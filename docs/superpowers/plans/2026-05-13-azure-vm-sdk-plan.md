@@ -117,12 +117,16 @@ from azure_vm._backend import CommandResult, FakeBackend
 
 
 def test_command_result_success():
-    result = CommandResult(args=["tofu", "output"], returncode=0, stdout='{"vm_ip":""}', stderr="")
+    result = CommandResult(
+        args=["tofu", "output"], returncode=0, stdout='{"vm_ip":""}', stderr=""
+    )
     assert result.success is True
 
 
 def test_command_result_failure():
-    result = CommandResult(args=["tofu", "apply"], returncode=1, stdout="", stderr="error")
+    result = CommandResult(
+        args=["tofu", "apply"], returncode=1, stdout="", stderr="error"
+    )
     assert result.success is False
 
 
@@ -145,9 +149,7 @@ def test_fake_backend_returns_configured_response():
         stdout='{"vm_ip":{"value":"1.2.3.4"}}',
         stderr="",
     )
-    backend = FakeBackend(
-        responses={("tofu", "output", "-json"): expected}
-    )
+    backend = FakeBackend(responses={("tofu", "output", "-json"): expected})
     result = backend.run(["tofu", "output", "-json"])
     assert result.stdout == '{"vm_ip":{"value":"1.2.3.4"}}'
 
@@ -232,9 +234,12 @@ class TofuBackend:
         env: dict[str, str] | None = None,
     ) -> CommandResult:
         try:
-            proc = subprocess.run(args, capture_output=True, text=True, cwd=cwd, env=env)
+            proc = subprocess.run(
+                args, capture_output=True, text=True, cwd=cwd, env=env
+            )
         except FileNotFoundError:
             from .exceptions import TofuNotInstalledError
+
             raise TofuNotInstalledError()
         return CommandResult(
             args=args,
@@ -411,9 +416,7 @@ class AzureVmCommandError(AzureVmError):
 
 class TofuNotInstalledError(AzureVmError):
     def __init__(self) -> None:
-        super().__init__(
-            "OpenTofu not found. Install from https://opentofu.org"
-        )
+        super().__init__("OpenTofu not found. Install from https://opentofu.org")
 
 
 class VmNotFoundError(AzureVmError):
@@ -688,32 +691,44 @@ from azure_vm.models import VmState
 from azure_vm.vm import AzureVM
 
 
-OUTPUT_JSON = json.dumps({
-    "vm_ip": {"value": "1.2.3.4"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_JSON = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.4"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {
+            "value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"
+        },
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
-OUTPUT_NO_IP = json.dumps({
-    "vm_ip": {"value": ""},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_NO_IP = json.dumps(
+    {
+        "vm_ip": {"value": ""},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {
+            "value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"
+        },
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
-OUTPUT_WITH_IP = json.dumps({
-    "vm_ip": {"value": "1.2.3.5"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_WITH_IP = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.5"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {
+            "value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"
+        },
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
 
 def make_ok(stdout: str = "") -> CommandResult:
@@ -726,10 +741,13 @@ def make_err(stderr: str, returncode: int = 1) -> CommandResult:
 
 # ---------------------------------------------------------------- info
 
+
 def test_info_returns_vm_info():
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
+        }
+    )
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
     info = vm.info()
     assert info.name == "my-vm"
@@ -738,15 +756,18 @@ def test_info_returns_vm_info():
 
 
 def test_info_raises_command_error_on_failure():
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_err("state not found"),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_err("state not found"),
+        }
+    )
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
     with pytest.raises(AzureVmCommandError):
         vm.info()
 
 
 # ------------------------------------------------------------ lifecycle
+
 
 def test_start_applies_with_running_state():
     backend = FakeBackend()
@@ -792,6 +813,7 @@ def test_lifecycle_raises_on_failure():
 
 
 # ---------------------------------------------------------------- exec
+
 
 @patch("azure_vm.vm.paramiko.SSHClient")
 def test_exec_runs_command_over_ssh(mock_ssh_client):
@@ -856,12 +878,13 @@ def test_exec_structured_builds_bash_command(mock_ssh_client):
     )
 
     command = ssh.exec_command.call_args[0][0]
-    assert 'cd /home/azureuser/project' in command
-    assert 'export CUDA_VISIBLE_DEVICES=0' in command
-    assert 'python train.py' in command
+    assert "cd /home/azureuser/project" in command
+    assert "export CUDA_VISIBLE_DEVICES=0" in command
+    assert "python train.py" in command
 
 
 # ------------------------------------------------------------- transfer
+
 
 @patch("azure_vm.vm.paramiko.SSHClient")
 def test_transfer_sends_file(mock_ssh_client, tmp_path):
@@ -882,6 +905,7 @@ def test_transfer_sends_file(mock_ssh_client, tmp_path):
 
 
 # --------------------------------------------------------------- clone
+
 
 def test_clone_returns_new_vm():
     backend = FakeBackend()
@@ -922,6 +946,7 @@ def test_wait_for_ip_raises_timeout(mock_sleep):
 
 
 # ---------------------------------------------------------- wait_ready
+
 
 @patch("azure_vm.vm.time.sleep")
 @patch("azure_vm.vm.socket.create_connection")
@@ -1091,12 +1116,15 @@ class AzureVM:
     def clone(self, new_name: str) -> "AzureVM":
         new_ws = self._workspace_dir.parent / new_name
         import shutil
+
         shutil.copytree(self._workspace_dir, new_ws, dirs_exist_ok=True)
         self._backend.run(
             ["tofu", "apply", "-auto-approve", "-var", f"vm_name={new_name}"],
             cwd=str(new_ws),
         )
-        return AzureVM(new_name, new_ws, self._backend, self._ssh_key_path, self._ssh_username)
+        return AzureVM(
+            new_name, new_ws, self._backend, self._ssh_key_path, self._ssh_username
+        )
 
     # --------------------------------------------------------- wait_for_ip
 
@@ -1161,14 +1189,18 @@ from azure_vm.models import VmState
 from azure_vm.vm import AzureVM
 
 
-OUTPUT_JSON = json.dumps({
-    "vm_ip": {"value": "1.2.3.4"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_JSON = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.4"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {
+            "value": "Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest"
+        },
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
 
 def make_ok(stdout: str = "") -> CommandResult:
@@ -1180,6 +1212,7 @@ def make_err(stderr: str = "error") -> CommandResult:
 
 
 # ------------------------------------------------------------ get_vm
+
 
 def test_get_vm_returns_azure_vm():
     client = AzureClient(
@@ -1194,6 +1227,7 @@ def test_get_vm_returns_azure_vm():
 
 
 # ------------------------------------------------------------ launch
+
 
 def test_launch_creates_workspace_and_runs_tofu(tmp_path):
     ws = tmp_path / "azure-vm-sdk"
@@ -1229,7 +1263,8 @@ def test_launch_shared_infra_created_on_first_call(tmp_path):
     client.launch(name="vm1")
     assert (ws / ".shared" / "main.tf").exists()
     shared_init = [
-        call for call, cwd in zip(backend.calls, backend.cwds)
+        call
+        for call, cwd in zip(backend.calls, backend.cwds)
         if "init" in call and cwd and ".shared" in cwd
     ]
     assert len(shared_init) == 1
@@ -1250,7 +1285,8 @@ def test_launch_shared_infra_skipped_on_second_call(tmp_path):
     )
     client.launch(name="vm2")
     shared_apply = [
-        call for call, cwd in zip(backend.calls, backend.cwds)
+        call
+        for call, cwd in zip(backend.calls, backend.cwds)
         if "apply" in call and cwd and ".shared" in cwd
     ]
     assert len(shared_apply) == 0
@@ -1309,8 +1345,8 @@ def test_launch_with_vm_size_and_disk(tmp_path):
     )
     client.launch(name="test-vm", vm_size="Standard_D2s_v3", disk_size_gb=100)
     tfvars = (ws / "test-vm" / "terraform.tfvars").read_text()
-    assert 'Standard_D2s_v3' in tfvars
-    assert '100' in tfvars
+    assert "Standard_D2s_v3" in tfvars
+    assert "100" in tfvars
 
 
 def test_launch_raises_on_failure():
@@ -1336,6 +1372,7 @@ def test_launch_raises_when_missing_rg():
 
 # --------------------------------------------------------------- list
 
+
 def test_list_returns_vms_from_workspace(tmp_path):
     ws = tmp_path / "azure-vm-sdk"
     ws.mkdir()
@@ -1343,9 +1380,11 @@ def test_list_returns_vms_from_workspace(tmp_path):
     vm_ws = ws / "vm-a"
     vm_ws.mkdir()
     (vm_ws / "main.tf").write_text("")
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
+        }
+    )
     client = AzureClient(
         resource_group="my-rg",
         location="westeurope",
@@ -1366,9 +1405,11 @@ def test_list_skips_shared_and_non_dirs(tmp_path):
     vm_ws = ws / "real-vm"
     vm_ws.mkdir()
     (vm_ws / "main.tf").write_text("")
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
+        }
+    )
     client = AzureClient(
         resource_group="my-rg",
         location="westeurope",
@@ -1382,17 +1423,34 @@ def test_list_skips_shared_and_non_dirs(tmp_path):
 
 # --------------------------------------------------------------- find
 
-AZ_IMAGE_LIST = json.dumps([
-    {"offer": "0001-com-ubuntu-server-noble", "publisher": "Canonical",
-     "sku": "24_04-lts", "version": "latest"},
-])
+AZ_IMAGE_LIST = json.dumps(
+    [
+        {
+            "offer": "0001-com-ubuntu-server-noble",
+            "publisher": "Canonical",
+            "sku": "24_04-lts",
+            "version": "latest",
+        },
+    ]
+)
 
 
 def test_find_returns_image_list():
-    backend = FakeBackend({
-        ("az", "vm", "image", "list", "--publisher", "Canonical",
-         "--all", "--output", "json"): make_ok(AZ_IMAGE_LIST),
-    })
+    backend = FakeBackend(
+        {
+            (
+                "az",
+                "vm",
+                "image",
+                "list",
+                "--publisher",
+                "Canonical",
+                "--all",
+                "--output",
+                "json",
+            ): make_ok(AZ_IMAGE_LIST),
+        }
+    )
     client = AzureClient(
         resource_group="my-rg",
         location="westeurope",
@@ -1405,10 +1463,21 @@ def test_find_returns_image_list():
 
 
 def test_find_with_custom_publisher():
-    backend = FakeBackend({
-        ("az", "vm", "image", "list", "--publisher", "Debian",
-         "--all", "--output", "json"): make_ok(AZ_IMAGE_LIST),
-    })
+    backend = FakeBackend(
+        {
+            (
+                "az",
+                "vm",
+                "image",
+                "list",
+                "--publisher",
+                "Debian",
+                "--all",
+                "--output",
+                "json",
+            ): make_ok(AZ_IMAGE_LIST),
+        }
+    )
     client = AzureClient(
         resource_group="my-rg",
         location="westeurope",
@@ -1420,6 +1489,7 @@ def test_find_with_custom_publisher():
 
 
 # -------------------------------------------------------------- purge
+
 
 def test_purge_destroys_all_vm_workspaces(tmp_path):
     ws = tmp_path / "azure-vm-sdk"
@@ -1458,13 +1528,15 @@ def test_purge_preserves_shared(tmp_path):
     )
     client.purge()
     shared_destroy = [
-        call for call, cwd in zip(backend.calls, backend.cwds)
+        call
+        for call, cwd in zip(backend.calls, backend.cwds)
         if "destroy" in call and cwd and ".shared" in cwd
     ]
     assert len(shared_destroy) == 0
 
 
 # ---------------------------------------------------- ensure_running
+
 
 def test_ensure_running_launches_when_not_found(tmp_path):
     ws = tmp_path / "azure-vm-sdk"
@@ -1488,9 +1560,11 @@ def test_ensure_running_is_noop_when_running(tmp_path):
     vm_ws = ws / "my-vm"
     vm_ws.mkdir(parents=True)
     (vm_ws / "main.tf").write_text("")
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
+        }
+    )
     client = AzureClient(
         resource_group="my-rg",
         location="westeurope",
@@ -1508,17 +1582,21 @@ def test_ensure_running_starts_stopped_vm(tmp_path):
     vm_ws = ws / "my-vm"
     vm_ws.mkdir(parents=True)
     (vm_ws / "main.tf").write_text("")
-    stopped = json.dumps({
-        "vm_ip": {"value": "1.2.3.4"},
-        "vm_state": {"value": "stopped"},
-        "location": {"value": "westeurope"},
-        "vm_size": {"value": "Standard_B1s"},
-        "image_urn": {"value": "Canonical:..."},
-        "resource_group": {"value": "my-rg"},
-    })
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(stopped),
-    })
+    stopped = json.dumps(
+        {
+            "vm_ip": {"value": "1.2.3.4"},
+            "vm_state": {"value": "stopped"},
+            "location": {"value": "westeurope"},
+            "vm_size": {"value": "Standard_B1s"},
+            "image_urn": {"value": "Canonical:..."},
+            "resource_group": {"value": "my-rg"},
+        }
+    )
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(stopped),
+        }
+    )
     backend.set_default(make_ok())
     client = AzureClient(
         resource_group="my-rg",
@@ -1739,7 +1817,9 @@ def _check(result: CommandResult) -> None:
 
 def _random_name() -> str:
     adj = random.choice(["brave", "calm", "eager", "keen", "lucid", "swift", "warm"])
-    noun = random.choice(["badger", "falcon", "heron", "otter", "puma", "raven", "trout"])
+    noun = random.choice(
+        ["badger", "falcon", "heron", "otter", "puma", "raven", "trout"]
+    )
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
     return f"vm-{adj}-{noun}-{suffix}"
 
@@ -1752,7 +1832,9 @@ class AzureClient:
         work_dir: str | Path = "~/.azure-vm-sdk",
         backend: CommandBackend | None = None,
     ) -> None:
-        self._resource_group = resource_group or os.environ.get("AZURE_RESOURCE_GROUP", "")
+        self._resource_group = resource_group or os.environ.get(
+            "AZURE_RESOURCE_GROUP", ""
+        )
         self._location = location or os.environ.get("AZURE_LOCATION", "")
         self._subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
         self._work_dir = Path(work_dir).expanduser()
@@ -1787,7 +1869,10 @@ class AzureClient:
         parts = urn.split(":")
         if len(parts) != 4:
             raise AzureVmCommandError(
-                ["parse", "urn"], 1, "", f"Invalid image URN: {urn!r}. Expected publisher:offer:sku:version"
+                ["parse", "urn"],
+                1,
+                "",
+                f"Invalid image URN: {urn!r}. Expected publisher:offer:sku:version",
             )
         return {
             "publisher": parts[0],
@@ -1811,9 +1896,11 @@ class AzureClient:
     ) -> AzureVM:
         if not self._resource_group or not self._location:
             raise AzureVmCommandError(
-                ["launch"], 1, "",
+                ["launch"],
+                1,
+                "",
                 "AZURE_RESOURCE_GROUP and AZURE_LOCATION must be set via env vars "
-                "or passed to AzureClient()"
+                "or passed to AzureClient()",
             )
         if name is None:
             name = _random_name()
@@ -1844,7 +1931,7 @@ class AzureClient:
             f'location = "{self._location}"\n'
             f'vm_name = "{name}"\n'
             f'vm_size = "{vm_size}"\n'
-            f'disk_size_gb = {disk_size_gb}\n'
+            f"disk_size_gb = {disk_size_gb}\n"
             f'image_publisher = "{img["publisher"]}"\n'
             f'image_offer = "{img["offer"]}"\n'
             f'image_sku = "{img["sku"]}"\n'
@@ -1862,8 +1949,12 @@ class AzureClient:
         self._run(["tofu", "init"], cwd=str(vm_dir))
         self._run(["tofu", "apply", "-auto-approve"], cwd=str(vm_dir))
 
-        return AzureVM(name, vm_dir, self._backend,
-                       ssh_key_path=os.environ.get("AZURE_SSH_KEY_PATH"))
+        return AzureVM(
+            name,
+            vm_dir,
+            self._backend,
+            ssh_key_path=os.environ.get("AZURE_SSH_KEY_PATH"),
+        )
 
     def ensure_running(
         self,
@@ -1878,8 +1969,10 @@ class AzureClient:
         vm_dir = self._vm_dir(name)
         if not vm_dir.exists() or not (vm_dir / "main.tf").exists():
             return self.launch(
-                name, image,
-                vm_size=vm_size, disk_size_gb=disk_size_gb,
+                name,
+                image,
+                vm_size=vm_size,
+                disk_size_gb=disk_size_gb,
                 cloud_init_config=cloud_init_config,
                 ssh_public_key=ssh_public_key,
             )
@@ -1889,8 +1982,10 @@ class AzureClient:
             info = vm.info()
         except AzureVmCommandError:
             return self.launch(
-                name, image,
-                vm_size=vm_size, disk_size_gb=disk_size_gb,
+                name,
+                image,
+                vm_size=vm_size,
+                disk_size_gb=disk_size_gb,
                 cloud_init_config=cloud_init_config,
                 ssh_public_key=ssh_public_key,
             )
@@ -1919,11 +2014,19 @@ class AzureClient:
         return results
 
     def find(self, publisher: str = "Canonical") -> list[ImageInfo]:
-        result = self._run([
-            "az", "vm", "image", "list",
-            "--publisher", publisher,
-            "--all", "--output", "json",
-        ])
+        result = self._run(
+            [
+                "az",
+                "vm",
+                "image",
+                "list",
+                "--publisher",
+                publisher,
+                "--all",
+                "--output",
+                "json",
+            ]
+        )
         return ImageInfo.from_az_image_list(json.loads(result.stdout))
 
     def purge(self) -> None:
@@ -1981,6 +2084,7 @@ def test_public_api_importable():
         FakeBackend,
         TofuBackend,
     )
+
     assert AzureClient is not None
     assert AzureVM is not None
 ```

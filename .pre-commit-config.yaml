@@ -1,0 +1,87 @@
+# Pre-commit hooks for azure-vm-sdk.
+#
+#   uv run pre-commit install          # enable on commit
+#   uv run pre-commit run --all-files  # run everything once
+#
+# Version policy: the ruff revision below MUST stay in sync with the `ruff`
+# pin in pyproject.toml. A newer ruff in pre-commit than in the dev environment
+# makes the hook report violations that `uv run ruff check` does not.
+#
+# No default_language_version is set on purpose: pinning it to a specific
+# python3.x makes pre-commit fail outright on a machine that does not have that
+# interpreter on PATH, and the one hook that needs the project's interpreter
+# (basedpyright) runs through `uv run --frozen` against the project venv anyway.
+
+fail_fast: false
+
+repos:
+  # ---------------------------------------------------------------------------
+  # Ruff - lint + format
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+        name: ruff (format)
+
+  # ---------------------------------------------------------------------------
+  # Type checking
+  #
+  # Runs through the project environment rather than a pre-commit mirror:
+  # basedpyright has to resolve `azure_vm` itself, and [tool.basedpyright]
+  # carries the include list and venv settings that make the pass meaningful.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: basedpyright
+        entry: uv run --frozen basedpyright
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      # The architectural contracts CI checks, run locally too.
+      - id: import-linter
+        name: import-linter
+        entry: uv run --frozen lint-imports --config .importlinter --no-cache
+        language: system
+        pass_filenames: false
+        files: ^src/
+
+  # ---------------------------------------------------------------------------
+  # Security
+  #
+  # This SDK drives an Azure VM over SSH and through OpenTofu, so subprocess
+  # and paramiko are its subject matter rather than a smell. B602 (shell=True)
+  # is deliberately not skipped anywhere: no call here uses it, and that must
+  # stay true.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.4"
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml"]
+        additional_dependencies: ["bandit[toml]"]
+        # pre-commit passes explicit filenames, which bypasses bandit's own
+        # exclude_dirs - so the test tree has to be excluded here as well.
+        exclude: ^tests/
+
+  # ---------------------------------------------------------------------------
+  # Generic file hygiene
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: mixed-line-ending
+        args: [--fix=lf]

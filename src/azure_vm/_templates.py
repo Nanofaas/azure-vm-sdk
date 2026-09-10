@@ -6,7 +6,6 @@ from pathlib import Path
 
 import yaml
 
-
 SHARED_TEMPLATE = """\
 terraform {{
   required_providers {{
@@ -197,9 +196,7 @@ def resolve_ssh_path(
     default_path: str | None = None,
 ) -> str:
     """Resolve an SSH key path, expanding ~ and applying fallback chain."""
-    return str(Path(
-        ssh_key_path or default_path or "~/.ssh/id_rsa.pub"
-    ).expanduser())
+    return str(Path(ssh_key_path or default_path or "~/.ssh/id_rsa.pub").expanduser())
 
 
 def write_cloud_init(workspace: Path, config: dict | str | None) -> str:
@@ -212,6 +209,7 @@ def write_cloud_init(workspace: Path, config: dict | str | None) -> str:
         content = config
     (workspace / "cloud-init.yaml").write_text(content)
     return '  custom_data = filebase64("cloud-init.yaml")\n'
+
 
 def render_security_rules(open_ports) -> str:
     """Extra inbound TCP allow-rules for the per-VM NSG.

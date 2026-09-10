@@ -1,5 +1,4 @@
-from azure_vm.models import VmInfo, VmState, ImageInfo
-
+from azure_vm.models import ImageInfo, VmInfo, VmState
 
 TOFU_OUTPUT = {
     "vm_ip": {"value": "1.2.3.4"},

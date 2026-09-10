@@ -96,17 +96,26 @@ class CommandResult:
     stdout: str
     stderr: str
 
+
 class CommandBackend(Protocol):
-    def run(self, args: list[str], *,
-            cwd: str | None = None,
-            env: dict[str, str] | None = None) -> CommandResult: ...
+    def run(
+        self,
+        args: list[str],
+        *,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> CommandResult: ...
+
 
 class TofuBackend:
     """Invokes the OpenTofu CLI. Respects Azure env vars from the caller's environment."""
+
     def run(self, args, *, cwd=None, env=None) -> CommandResult: ...
+
 
 class FakeBackend:
     """Pre-configured responses for testing. Records all calls."""
+
     # identical semantics to multipass-sdk FakeBackend, plus cwd tracking
 ```
 
@@ -131,10 +140,11 @@ class SshConnectionError(AzureVmError):       # SSH unreachable or auth failure
 ```python
 class VmState(Enum):
     RUNNING = "running"
-    STOPPED = "stopped"          # deallocated in Azure
+    STOPPED = "stopped"  # deallocated in Azure
     STARTING = "starting"
     STOPPING = "stopping"
     UNKNOWN = "unknown"
+
 
 @dataclass
 class VmInfo:
@@ -151,6 +161,7 @@ class VmInfo:
     @classmethod
     def from_list_item(cls, data: dict) -> "VmInfo": ...
 
+
 @dataclass
 class ImageInfo:
     publisher: str
@@ -166,8 +177,13 @@ class ImageInfo:
 
 ```python
 class AzureVM:
-    def __init__(self, name: str, workspace_dir: Path,
-                 backend: CommandBackend, ssh_key_path: str | None = None): ...
+    def __init__(
+        self,
+        name: str,
+        workspace_dir: Path,
+        backend: CommandBackend,
+        ssh_key_path: str | None = None,
+    ): ...
 
     # Lifecycle — all via tofu
     def info(self) -> VmInfo: ...
@@ -219,9 +235,16 @@ class AzureClient:
         ssh_public_key: str | None = None,
     ) -> AzureVM: ...
 
-    def ensure_running(self, name, *, image=None, vm_size="Standard_B1s",
-                       disk_size_gb=30, cloud_init_config=None,
-                       ssh_public_key=None) -> AzureVM: ...
+    def ensure_running(
+        self,
+        name,
+        *,
+        image=None,
+        vm_size="Standard_B1s",
+        disk_size_gb=30,
+        cloud_init_config=None,
+        ssh_public_key=None,
+    ) -> AzureVM: ...
 
     def list(self) -> list[VmInfo]: ...
     def find(self, publisher="Canonical") -> list[ImageInfo]: ...

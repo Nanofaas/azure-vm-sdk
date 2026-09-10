@@ -36,24 +36,26 @@ from azure_vm import AzureClient, VmConfig
 client = AzureClient(resource_group="my-rg", location="westeurope")
 
 # Different names, sizes, and images
-vms = client.launch_many([
-    VmConfig(
-        name="frontend",
-        vm_size="Standard_B1s",
-        image_urn="Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest",
-    ),
-    VmConfig(
-        name="backend",
-        vm_size="Standard_B2s",
-        image_urn="Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
-        disk_size_gb=64,
-    ),
-    VmConfig(
-        name="db",
-        vm_size="Standard_D2s_v3",
-        disk_size_gb=128,
-    ),
-])
+vms = client.launch_many(
+    [
+        VmConfig(
+            name="frontend",
+            vm_size="Standard_B1s",
+            image_urn="Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest",
+        ),
+        VmConfig(
+            name="backend",
+            vm_size="Standard_B2s",
+            image_urn="Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest",
+            disk_size_gb=64,
+        ),
+        VmConfig(
+            name="db",
+            vm_size="Standard_D2s_v3",
+            disk_size_gb=128,
+        ),
+    ]
+)
 
 for vm in vms:
     print(vm.name, vm.info().ipv4)

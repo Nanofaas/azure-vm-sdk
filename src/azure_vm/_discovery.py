@@ -16,10 +16,15 @@ def list_images(
     result = run_command(
         backend,
         [
-            "az", "vm", "image", "list",
-            "--publisher", publisher,
+            "az",
+            "vm",
+            "image",
+            "list",
+            "--publisher",
+            publisher,
             "--all",
-            "--output", "json",
+            "--output",
+            "json",
         ],
     )
     return ImageInfo.from_az_image_list(json.loads(result.stdout))
@@ -33,9 +38,13 @@ def list_sizes(
     result = run_command(
         backend,
         [
-            "az", "vm", "list-sizes",
-            "--location", location,
-            "--output", "json",
+            "az",
+            "vm",
+            "list-sizes",
+            "--location",
+            location,
+            "--output",
+            "json",
         ],
     )
     return VmSize.from_az_vm_size_list(json.loads(result.stdout))

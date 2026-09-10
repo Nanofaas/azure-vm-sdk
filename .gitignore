@@ -3,9 +3,20 @@ __pycache__/
 .venv/
 *.pyc
 *.egg-info/
+build/
 dist/
-uv.lock
 *.svg
 .pydeps/
 .basedpyright/
 .ruff_cache/
+.mypy_cache/
+.grimp_cache/
+
+# Coverage reports. `uv.lock` is deliberately NOT ignored any more: this
+# repository tracks it so CI can run `uv sync --frozen`, like the sibling
+# projects. Leaving it ignored meant a clean checkout had no lockfile at all and
+# `--frozen` could not be used.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

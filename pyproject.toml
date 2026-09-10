@@ -25,7 +25,12 @@ dev = [
     "grimp>=3.14",
     "import-linter>=2.11",
     "pydeps>=3.0.6",
-    "ruff>=0.15.12",
+    # Pinned exactly to match the ruff-pre-commit revision in
+    # .pre-commit-config.yaml. A newer ruff in either place makes the hook and a
+    # local `ruff check` disagree about what a violation is. Bump both together.
+    "ruff==0.16.6",
+    "bandit>=1.8",
+    "pre-commit>=4.0",
 ]
 
 [build-system]
@@ -40,22 +45,119 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (require Azure + OpenTofu installed)",
 ]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration' --cov=azure_vm --cov-report=term-missing"
+
+# =============================================================================
+# Ruff - linting + formatting
+# =============================================================================
+# The project previously selected only ["F", "SLF"]. SLF is kept - it was a
+# deliberate choice here - and the rest of the shared rule set is added on top.
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 88
+# ruff's built-in exclude list has `dist` but not `build`, so a setuptools or
+# hatchling build tree left in the package gets linted as if it were source.
+extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
-select = ["F", "SLF"]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # Pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self - private member access
+    "TID",   # flake8-tidy-imports
+    "RUF",   # Ruff-specific rules
+    "PERF",  # Perflint
+    "PT",    # flake8-pytest-style
+    "RET",   # flake8-return
+    "PTH",   # flake8-use-pathlib
+    "ERA",   # eradicate - commented-out code
+    "D",     # pydocstyle - this is a published SDK with a public API
+]
+ignore = [
+    # Mutually exclusive summary conventions. Summary on the first line (D212)
+    # is the chosen convention, so its counterpart D213 is off; D203 pairs with
+    # D211 the same way.
+    "D203",
+    "D213",
+    "PT018",
+]
+
+[tool.ruff.lint.isort]
+# Declared rather than inferred: ruff derives first-party packages from the
+# project root, which changes with --config, and this repository runs ruff with
+# the package's own config in CI.
+known-first-party = ["azure_vm"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["F401", "F841", "SLF001"]
+# Test functions are documented by their name; requiring a docstring on every
+# one of them is noise, not documentation. Style rules (D2xx/D4xx) still apply.
+"tests/**/*.py" = [
+    "F401",
+    "F841",
+    "SLF001",
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+]
+
+# =============================================================================
+# Coverage
+# =============================================================================
+
+[tool.coverage.run]
+branch = true
+source = ["azure_vm"]
+# e2e.py is the `azure-vm-e2e` entry point: a CLI harness whose every path
+# drives real Azure credentials and OpenTofu, so it is exercised by the
+# integration suite rather than by unit tests. Counting it would report 0% for a
+# file that is covered the only way it can be. Same treatment as multipass-sdk's
+# and proxmox-sdk's e2e.py.
+omit = ["src/azure_vm/e2e.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+
+# =============================================================================
+# basedpyright - type checking
+# =============================================================================
+# reportImplicitOverride is left off because typing.override requires 3.12 and
+# this package supports 3.11 (see the same note in shellcraft and proxmox-sdk).
 
 [tool.basedpyright]
+typeCheckingMode = "standard"
 include = [
     "src",
 ]
-typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 reportPrivateUsage = false
+venvPath = "."
+venv = ".venv"
+
+# =============================================================================
+# Bandit - security static analysis
+# =============================================================================
+# This SDK drives an Azure VM over SSH and through OpenTofu, so subprocess and
+# paramiko are its subject matter rather than a smell. B602 (shell=True) stays
+# enabled: no call in this codebase uses it, and that must remain true.
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = [
+    # B404 (import subprocess), B603 (subprocess call), B607 (partial path):
+    # unavoidable for a wrapper around external commands.
+    "B404",
+    "B603",
+    "B607",
+    # B601 fires on every paramiko exec_command, which is what AzureVM.exec()
+    # exists to do. The single call site passes `shlex.join(command)`, so the
+    # argv list is shell-quoted before it reaches the remote shell rather than
+    # interpolated raw.
+    "B601",
+]

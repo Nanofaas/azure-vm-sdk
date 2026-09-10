@@ -1,0 +1,33 @@
+# Normalize line endings. This SDK is consumed from wherever the caller happens
+# to be, so a CRLF leaked in from a Windows editor breaks things in ways that
+# are hard to spot in review.
+* text=auto eol=lf
+
+*.py    text diff=python
+*.toml  text
+*.yml   text
+*.yaml  text
+*.json  text
+*.md    text diff=markdown
+*.txt   text
+*.ini   text
+*.cfg   text
+
+# Binary assets: never normalize, never try to diff.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.whl   binary
+*.gz    binary
+*.zip   binary
+
+# Generated at runtime.
+.coverage       linguist-generated=true
+coverage.xml    linguist-generated=true
+# `linguist-generated` keeps this out of the language stats and collapses it in
+# the GitHub diff view, which is right for a generated file. `-diff` is
+# deliberately NOT set: a lockfile pins exact versions and hashes, so a change
+# to it is exactly the kind of thing review should be able to see.
+uv.lock         linguist-generated=true

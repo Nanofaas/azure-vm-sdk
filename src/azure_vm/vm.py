@@ -1,3 +1,5 @@
+"""Handle to a single Azure VM and the OpenTofu workspace backing it."""
+
 from __future__ import annotations
 
 import json
@@ -18,6 +20,12 @@ from .models import VmInfo
 
 
 class AzureVM:
+    """One Azure VM, driven through the OpenTofu workspace it was created from.
+
+    Lifecycle calls shell out to ``tofu`` in ``workspace_dir``; the SSH methods
+    open (and reuse) a paramiko connection to the VM's public IP.
+    """
+
     def __init__(
         self,
         name: str,
@@ -29,6 +37,12 @@ class AzureVM:
         ssh_keepalive_interval: float = 30.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
     ) -> None:
+        """Bind the handle to a VM name, workspace directory and command backend.
+
+        ``ssh_client_id`` is the client banner paramiko announces during the
+        handshake; ``None`` leaves paramiko's own default in place. A
+        ``ssh_keepalive_interval`` of zero disables keepalive probes.
+        """
         self.name = name
         self._workspace_dir = workspace_dir
         self._backend = backend
@@ -53,24 +67,34 @@ class AzureVM:
     # ------------------------------------------------------------ lifecycle
 
     def info(self) -> VmInfo:
+        """Read the workspace outputs and return the VM's current details."""
         result = self._run(["tofu", "output", "-json"])
         return VmInfo.from_tofu_output(json.loads(result.stdout), self.name)
 
     def start(self) -> None:
+        """Apply the workspace with ``desired_state=running``."""
         self._run(["tofu", "apply", "-auto-approve", "-var", "desired_state=running"])
 
     def stop(self) -> None:
+        """Apply the workspace with ``desired_state=stopped``."""
         self._run(["tofu", "apply", "-auto-approve", "-var", "desired_state=stopped"])
 
     def restart(self) -> None:
+        """Apply the workspace with ``desired_state=restart``.
+
+        ``restart`` is not a ``VmState`` member, so ``info()`` reports
+        ``VmState.UNKNOWN`` until a running or stopped state is applied again.
+        """
         self._run(["tofu", "apply", "-auto-approve", "-var", "desired_state=restart"])
 
     def delete(self) -> None:
+        """Destroy the workspace, removing the VM and its Azure resources."""
         self._run(["tofu", "destroy", "-auto-approve"])
 
     # ---------------------------------------------------------------- SSH
 
     def close(self) -> None:
+        """Close the cached SSH connection, if one is open."""
         if self._ssh is not None:
             self._ssh.close()
             self._ssh = None
@@ -103,7 +127,13 @@ class AzureVM:
             # field is the documented override point.
             paramiko.Transport._CLIENT_ID = self._ssh_client_id  # type: ignore[attr-defined]  # noqa: SLF001
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # The VM was just created, so its host key cannot be in known_hosts and
+        # there is no trusted channel to verify it over. AutoAddPolicy therefore
+        # accepts whatever key the peer presents on this first connection, which
+        # also accepts a machine-in-the-middle between the SDK and the VM. The
+        # alternative — pinning the key out of band — is left to the caller;
+        # silently failing every connection to a new VM would be worse.
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
         try:
             ssh.connect(
                 hostname=ip,
@@ -125,6 +155,12 @@ class AzureVM:
         return ssh
 
     def exec(self, command: list[str]) -> CommandResult:
+        """Run ``command`` over SSH and return its captured output and exit code.
+
+        The argv is shell-quoted and joined into a single string before being
+        sent. A connection dropped mid-command clears the cached session and
+        re-raises the original error.
+        """
         ssh = self._ssh_client()
         try:
             _, stdout, stderr = ssh.exec_command(shlex.join(command))
@@ -146,6 +182,12 @@ class AzureVM:
         env: dict[str, str] | None = None,
         cwd: str | None = None,
     ) -> CommandResult:
+        """Run ``argv`` under ``bash -lc``, optionally with ``env`` and ``cwd``.
+
+        ``cwd`` becomes a leading ``cd`` and each ``env`` entry an ``export``;
+        the parts are chained with ``&&`` so a failure in any of them
+        short-circuits the command.
+        """
         parts: list[str] = []
         if cwd:
             parts.append(f"cd {shlex.quote(cwd)}")
@@ -156,6 +198,13 @@ class AzureVM:
         return self.exec(["bash", "-lc", command])
 
     def transfer(self, source: str, dest: str) -> None:
+        """Copy a file to or from the VM over SFTP.
+
+        A ``source`` containing ``:`` is read as the remote path and downloaded
+        to the local ``dest``; otherwise the local ``source`` is uploaded to
+        the remote ``dest``. The transfer uses its own connection, which is
+        closed when the copy finishes.
+        """
         ssh = self._connect_ssh()
         try:
             sftp = ssh.open_sftp()
@@ -171,7 +220,14 @@ class AzureVM:
 
     # --------------------------------------------------------------- clone
 
-    def clone(self, new_name: str) -> "AzureVM":
+    def clone(self, new_name: str) -> AzureVM:
+        """Copy this VM's workspace to ``new_name`` and apply it.
+
+        The sibling directory ``<parent>/<new_name>`` receives a copy of the
+        current workspace, then ``tofu apply`` creates a VM named ``new_name``
+        within it. The returned handle reuses this VM's backend, SSH key and
+        username, but starts with its own connection and default SSH timing.
+        """
         new_ws = self._workspace_dir.parent / new_name
         if self._workspace_dir.exists():
             shutil.copytree(self._workspace_dir, new_ws, dirs_exist_ok=True)
@@ -192,6 +248,12 @@ class AzureVM:
     # --------------------------------------------------------- wait_for_ip
 
     def wait_for_ip(self, timeout: float = 120, *, interval: float = 2.0) -> str:
+        """Poll the workspace outputs until the VM has a public IP.
+
+        Returns the IP as soon as it appears, polling every ``interval``
+        seconds; raises ``AzureVmTimeoutError`` once ``timeout`` seconds have
+        elapsed.
+        """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             ip = self._ip()
@@ -205,6 +267,12 @@ class AzureVM:
     def wait_ready(
         self, timeout: float = 120, port: int = 22, *, interval: float = 2.0
     ) -> str:
+        """Wait until the VM's public IP accepts TCP connections on ``port``.
+
+        Polls every ``interval`` seconds and returns the IP once a connection
+        attempt succeeds; raises ``AzureVmTimeoutError`` if ``timeout`` seconds
+        pass with no successful connect.
+        """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             ip = self._ip()

@@ -4,6 +4,7 @@ Regression for the nanofaas incident (2026-06-11): the first run baked a
 placeholder resource group into ~/.azure-vm-sdk/<vm>/main.tf and every later
 run reused the stale file, ignoring the corrected configuration.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,15 +12,16 @@ import json
 from azure_vm._backend import CommandResult, FakeBackend
 from azure_vm.client import AzureClient
 
-
-OUTPUT_JSON = json.dumps({
-    "vm_ip": {"value": "1.2.3.4"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
-    "resource_group": {"value": "old-rg"},
-})
+OUTPUT_JSON = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.4"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
+        "resource_group": {"value": "old-rg"},
+    }
+)
 
 
 def _ok(stdout: str = "") -> CommandResult:
@@ -42,7 +44,7 @@ def test_ensure_running_rerenders_workspace_from_current_config(tmp_path):
     backend.set_default(_ok(OUTPUT_JSON))
 
     _client(ws, "old-rg", backend).launch(name="vm1")
-    assert 'old-rg' in (ws / "vm1" / "main.tf").read_text()
+    assert "old-rg" in (ws / "vm1" / "main.tf").read_text()
 
     _client(ws, "new-rg", backend).ensure_running("vm1", vm_size="Standard_B2s")
 
@@ -88,6 +90,6 @@ def _shared_applies(backend: FakeBackend, ws) -> int:
     shared = str(ws / ".shared")
     return sum(
         1
-        for call, cwd in zip(backend.calls, backend.cwds)
+        for call, cwd in zip(backend.calls, backend.cwds, strict=True)
         if cwd == shared and call[:2] == ["tofu", "apply"]
     )

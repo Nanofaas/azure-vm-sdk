@@ -13,33 +13,38 @@ from azure_vm.exceptions import (
 from azure_vm.models import VmState
 from azure_vm.vm import AzureVM
 
+OUTPUT_JSON = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.4"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
-OUTPUT_JSON = json.dumps({
-    "vm_ip": {"value": "1.2.3.4"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_NO_IP = json.dumps(
+    {
+        "vm_ip": {"value": ""},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
-OUTPUT_NO_IP = json.dumps({
-    "vm_ip": {"value": ""},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
-    "resource_group": {"value": "my-rg"},
-})
-
-OUTPUT_WITH_IP = json.dumps({
-    "vm_ip": {"value": "1.2.3.5"},
-    "vm_state": {"value": "running"},
-    "location": {"value": "westeurope"},
-    "vm_size": {"value": "Standard_B1s"},
-    "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
-    "resource_group": {"value": "my-rg"},
-})
+OUTPUT_WITH_IP = json.dumps(
+    {
+        "vm_ip": {"value": "1.2.3.5"},
+        "vm_state": {"value": "running"},
+        "location": {"value": "westeurope"},
+        "vm_size": {"value": "Standard_B1s"},
+        "image_urn": {"value": "Canonical:ubuntu-24_04-lts:server-gen1:latest"},
+        "resource_group": {"value": "my-rg"},
+    }
+)
 
 
 def make_ok(stdout: str = "") -> CommandResult:
@@ -52,10 +57,13 @@ def make_err(stderr: str, returncode: int = 1) -> CommandResult:
 
 # ---------------------------------------------------------------- info
 
+
 def test_info_returns_vm_info():
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_ok(OUTPUT_JSON),
+        }
+    )
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
     info = vm.info()
     assert info.name == "my-vm"
@@ -64,15 +72,18 @@ def test_info_returns_vm_info():
 
 
 def test_info_raises_command_error_on_failure():
-    backend = FakeBackend({
-        ("tofu", "output", "-json"): make_err("state not found"),
-    })
+    backend = FakeBackend(
+        {
+            ("tofu", "output", "-json"): make_err("state not found"),
+        }
+    )
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
     with pytest.raises(AzureVmCommandError):
         vm.info()
 
 
 # ------------------------------------------------------------ lifecycle
+
 
 def test_start_applies_with_running_state():
     backend = FakeBackend()
@@ -119,6 +130,7 @@ def test_lifecycle_raises_on_failure():
 
 # ---------------------------------------------------------------- SSH
 
+
 def test_ssh_client_raises_timeout_when_no_ip():
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_NO_IP))
@@ -130,6 +142,7 @@ def test_ssh_client_raises_timeout_when_no_ip():
 
 
 # ---------------------------------------------------------------- exec
+
 
 @patch("azure_vm.vm.paramiko.SSHClient")
 def test_exec_runs_command_over_ssh(mock_ssh_client):
@@ -235,7 +248,9 @@ def test_exec_discards_a_connection_that_fails_during_command(mock_ssh_client):
 
 @patch("azure_vm.vm.paramiko.Transport")
 @patch("azure_vm.vm.paramiko.SSHClient")
-def test_exec_announces_an_openssh_client_banner_by_default(mock_ssh_client, mock_transport):
+def test_exec_announces_an_openssh_client_banner_by_default(
+    mock_ssh_client, mock_transport
+):
     ssh = MagicMock()
     mock_ssh_client.return_value = ssh
     stdout = MagicMock()
@@ -245,7 +260,9 @@ def test_exec_announces_an_openssh_client_banner_by_default(mock_ssh_client, moc
 
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_JSON))
-    AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend, ssh_key_path="/key.pem").exec(["true"])
+    AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend, ssh_key_path="/key.pem").exec(
+        ["true"]
+    )
 
     # SSH-inspecting firewalls RST non-OpenSSH clients; paramiko must present
     # as OpenSSH via Transport._CLIENT_ID before the handshake.
@@ -254,7 +271,9 @@ def test_exec_announces_an_openssh_client_banner_by_default(mock_ssh_client, moc
 
 @patch("azure_vm.vm.paramiko.Transport")
 @patch("azure_vm.vm.paramiko.SSHClient")
-def test_exec_leaves_the_client_banner_untouched_when_disabled(mock_ssh_client, mock_transport):
+def test_exec_leaves_the_client_banner_untouched_when_disabled(
+    mock_ssh_client, mock_transport
+):
     original = object()
     mock_transport._CLIENT_ID = original
     ssh = MagicMock()
@@ -267,7 +286,11 @@ def test_exec_leaves_the_client_banner_untouched_when_disabled(mock_ssh_client, 
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_JSON))
     AzureVM(
-        "my-vm", Path("/tmp/ws/my-vm"), backend, ssh_key_path="/key.pem", ssh_client_id=None
+        "my-vm",
+        Path("/tmp/ws/my-vm"),
+        backend,
+        ssh_key_path="/key.pem",
+        ssh_client_id=None,
     ).exec(["true"])
 
     assert mock_transport._CLIENT_ID is original
@@ -357,12 +380,13 @@ def test_exec_structured_builds_bash_command(mock_ssh_client):
     )
 
     command = ssh.exec_command.call_args[0][0]
-    assert 'cd /home/azureuser/project' in command
-    assert 'export CUDA_VISIBLE_DEVICES=0' in command
-    assert 'python train.py' in command
+    assert "cd /home/azureuser/project" in command
+    assert "export CUDA_VISIBLE_DEVICES=0" in command
+    assert "python train.py" in command
 
 
 # ------------------------------------------------------------- transfer
+
 
 @patch("azure_vm.vm.paramiko.SSHClient")
 def test_transfer_uses_a_dedicated_connection(mock_ssh_client, tmp_path):
@@ -405,6 +429,7 @@ def test_transfer_discards_a_connection_that_fails(mock_ssh_client, tmp_path):
     sftp.close.assert_called_once_with()
     ssh.close.assert_called_once_with()
 
+
 @patch("azure_vm.vm.paramiko.SSHClient")
 def test_transfer_sends_file(mock_ssh_client, tmp_path):
     ssh = MagicMock()
@@ -436,10 +461,13 @@ def test_transfer_downloads_file(mock_ssh_client, tmp_path):
 
     vm.transfer("remote:/path/to/file", str(tmp_path / "downloaded.txt"))
 
-    sftp.get.assert_called_once_with("remote:/path/to/file", str(tmp_path / "downloaded.txt"))
+    sftp.get.assert_called_once_with(
+        "remote:/path/to/file", str(tmp_path / "downloaded.txt")
+    )
 
 
 # --------------------------------------------------------------- clone
+
 
 def test_clone_returns_new_vm():
     backend = FakeBackend()
@@ -484,14 +512,17 @@ def test_wait_for_ip_raises_timeout(mock_sleep):
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_NO_IP))
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
-    with patch("azure_vm.vm.time.monotonic", side_effect=[0, 130]):
-        with pytest.raises(AzureVmTimeoutError) as exc_info:
-            vm.wait_for_ip(timeout=120)
+    with (
+        patch("azure_vm.vm.time.monotonic", side_effect=[0, 130]),
+        pytest.raises(AzureVmTimeoutError) as exc_info,
+    ):
+        vm.wait_for_ip(timeout=120)
     assert exc_info.value.name == "my-vm"
     assert exc_info.value.timeout == 120
 
 
 # ---------------------------------------------------------- wait_ready
+
 
 @patch("azure_vm.vm.time.sleep")
 @patch("azure_vm.vm.socket.create_connection")
@@ -512,10 +543,12 @@ def test_wait_ready_retries_on_oserror(mock_sleep):
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_WITH_IP))
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
-    with patch("azure_vm.vm.time.monotonic", side_effect=[0, 1, 5, 130]):
-        with patch("azure_vm.vm.socket.create_connection", side_effect=OSError):
-            with pytest.raises(AzureVmTimeoutError):
-                vm.wait_ready(timeout=120, port=22)
+    with (
+        patch("azure_vm.vm.time.monotonic", side_effect=[0, 1, 5, 130]),
+        patch("azure_vm.vm.socket.create_connection", side_effect=OSError),
+        pytest.raises(AzureVmTimeoutError),
+    ):
+        vm.wait_ready(timeout=120, port=22)
     assert mock_sleep.call_count == 2
 
 
@@ -524,7 +557,9 @@ def test_wait_ready_raises_timeout_when_port_unreachable(mock_sleep):
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_WITH_IP))
     vm = AzureVM("my-vm", Path("/tmp/ws/my-vm"), backend)
-    with patch("azure_vm.vm.time.monotonic", side_effect=[0, 130]):
-        with patch("azure_vm.vm.socket.create_connection", side_effect=OSError):
-            with pytest.raises(AzureVmTimeoutError):
-                vm.wait_ready(timeout=120, port=22)
+    with (
+        patch("azure_vm.vm.time.monotonic", side_effect=[0, 130]),
+        patch("azure_vm.vm.socket.create_connection", side_effect=OSError),
+        pytest.raises(AzureVmTimeoutError),
+    ):
+        vm.wait_ready(timeout=120, port=22)

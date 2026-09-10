@@ -1,5 +1,7 @@
-"""End-to-end verification: create VM(s), verify readiness, execute a command,
-delete the VM(s).
+"""End-to-end verification of the VM lifecycle.
+
+Creates VM(s), waits for them to become reachable, runs a command over SSH
+and deletes them again.
 
 Prerequisites:
     az login
@@ -67,45 +69,62 @@ def _verify_vm(vm: AzureVM, idx: int, total: int, timeout: float) -> int:
         exit_code = 1
 
     info = vm.info()
-    print(f"{label}: state={info.state.value}  location={info.location}  "
-          f"resource_group={info.resource_group}")
+    print(
+        f"{label}: state={info.state.value}  location={info.location}  "
+        f"resource_group={info.resource_group}"
+    )
     return exit_code
 
 
 def main() -> None:
+    """Run the full lifecycle check for the VMs named on the command line.
+
+    Always exits through ``SystemExit``: 0 on success, 1 when a VM failed
+    verification, 2 when an ``AzureVmError`` aborted the run, 3 when cleanup
+    could not delete a VM, and 130 when interrupted.
+    """
     parser = argparse.ArgumentParser(
         description="End-to-end VM lifecycle test (create, verify, delete)."
     )
     parser.add_argument(
-        "--name", default=None,
+        "--name",
+        default=None,
         help="VM name; used as prefix when --count > 1 (auto-generated if omitted).",
     )
     parser.add_argument(
-        "--vm-size", default="Standard_B1s",
+        "--vm-size",
+        default="Standard_B1s",
         help="Azure VM size (default: Standard_B1s).",
     )
     parser.add_argument(
-        "--image-urn", default=None,
+        "--image-urn",
+        default=None,
         help="Azure image URN (publisher:offer:sku:version).",
     )
     parser.add_argument(
-        "--timeout", type=float, default=300,
+        "--timeout",
+        type=float,
+        default=300,
         help="Max seconds to wait for SSH readiness (default: 300).",
     )
     parser.add_argument(
-        "--count", type=int, default=1,
+        "--count",
+        type=int,
+        default=1,
         help="Number of identical VMs to create in parallel (default: 1).",
     )
     parser.add_argument(
         "--configs",
         help=(
             "JSON array of VM configs, e.g. "
-            "'[{\"name\":\"web\",\"vm_size\":\"Standard_B1s\"},{\"name\":\"db\",\"vm_size\":\"Standard_D2s_v3\"}]'. "
+            '\'[{"name":"web","vm_size":"Standard_B1s"},'
+            '{"name":"db","vm_size":"Standard_D2s_v3"}]\'. '
             "Mutually exclusive with --count/--name/--vm-size/--image-urn."
         ),
     )
     parser.add_argument(
-        "--list-sizes", action="store_true",
+        "--list-sizes",
+        action="store_true",
         help="List available VM sizes in the configured region and exit.",
     )
     args = parser.parse_args()
@@ -128,7 +147,10 @@ def main() -> None:
     if args.list_sizes:
         sizes = client.list_sizes()
         print(f"Available VM sizes in {location}:")
-        print(f"{'Name':<24} {'Cores':>6} {'RAM (MB)':>10} {'OS Disk (MB)':>14} {'Data Disks':>11}")
+        print(
+            f"{'Name':<24} {'Cores':>6} {'RAM (MB)':>10} {'OS Disk (MB)':>14} "
+            f"{'Data Disks':>11}"
+        )
         print("-" * 70)
         for s in sizes:
             print(
@@ -145,7 +167,7 @@ def main() -> None:
             raise SystemExit(f"--configs: invalid JSON — {exc}") from exc
         if not isinstance(raw, list) or not raw:
             raise SystemExit("--configs: expected a non-empty JSON array")
-        valid_fields = {f for f in VmConfig.__dataclass_fields__}
+        valid_fields = set(VmConfig.__dataclass_fields__)
         configs = []
         for i, item in enumerate(raw):
             unknown = set(item) - valid_fields
@@ -155,10 +177,14 @@ def main() -> None:
     else:
         prefix = args.name or f"e2e-{int(time.time())}"
         if args.count == 1:
-            configs = [VmConfig(name=prefix, vm_size=args.vm_size, image_urn=args.image_urn)]
+            configs = [
+                VmConfig(name=prefix, vm_size=args.vm_size, image_urn=args.image_urn)
+            ]
         else:
             configs = [
-                VmConfig(name=f"{prefix}-{i}", vm_size=args.vm_size, image_urn=args.image_urn)
+                VmConfig(
+                    name=f"{prefix}-{i}", vm_size=args.vm_size, image_urn=args.image_urn
+                )
                 for i in range(args.count)
             ]
 
@@ -178,7 +204,10 @@ def main() -> None:
         t0 = time.monotonic()
         vms = client.launch_many(configs)
         dt = time.monotonic() - t0
-        print(f"       {'launch' if n == 1 else 'all ' + str(n) + ' launches'} completed in {dt:.1f}s")
+        print(
+            f"       {'launch' if n == 1 else 'all ' + str(n) + ' launches'}"
+            f" completed in {dt:.1f}s"
+        )
 
         # --- verify each VM --------------------------------------------------
         print(f"[2/3] Verifying {n} VM(s) ...")

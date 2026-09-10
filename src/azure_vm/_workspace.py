@@ -43,7 +43,8 @@ class Workspace:
     def ensure_shared_infra(self, resource_group: str, location: str) -> None:
         shared = self.shared_dir()
         hcl = SHARED_TEMPLATE.format(
-            resource_group=resource_group, location=location,
+            resource_group=resource_group,
+            location=location,
         )
         main_tf = shared / "main.tf"
         # Re-render from the current configuration: an existing workspace must
@@ -80,10 +81,7 @@ class Workspace:
         publisher, offer, sku, version = parse_image_urn(image_urn)
         effective_ssh_path = resolve_ssh_path(ssh_key_path, default_ssh_key)
 
-        full_urn = (
-            image_urn
-            or "Canonical:ubuntu-24_04-lts:server-gen1:latest"
-        )
+        full_urn = image_urn or "Canonical:ubuntu-24_04-lts:server-gen1:latest"
 
         hcl = VM_TEMPLATE.format(
             resource_group=resource_group,
@@ -108,7 +106,11 @@ class Workspace:
         (workspace / "terraform.tfvars").write_text(tfvars)
 
     def iter_vm_workspaces(self) -> Iterator[Path]:
-        """Yield VM workspace directories (skip hidden, non-dirs, and dirs without main.tf)."""
+        """Yield VM workspace directories in sorted order.
+
+        Hidden entries, non-directories, and directories that hold no
+        ``main.tf`` are skipped.
+        """
         for item in sorted(self._root.iterdir()):
             if item.name.startswith("."):
                 continue
@@ -165,9 +167,7 @@ def _try_import_resource_group(
     if not sub_id:
         return
 
-    resource_id = (
-        f"/subscriptions/{sub_id}/resourceGroups/{resource_group}"
-    )
+    resource_id = f"/subscriptions/{sub_id}/resourceGroups/{resource_group}"
     # Intentionally ignore result — import is best-effort.
     backend.run(
         ["tofu", "import", "azurerm_resource_group.main", resource_id],

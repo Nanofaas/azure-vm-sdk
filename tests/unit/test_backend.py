@@ -1,17 +1,22 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from azure_vm._backend import CommandResult, FakeBackend, TofuBackend
 from azure_vm.exceptions import TofuNotInstalledError
 
 
 def test_command_result_success():
-    result = CommandResult(args=["tofu", "output"], returncode=0, stdout='{"vm_ip":""}', stderr="")
+    result = CommandResult(
+        args=["tofu", "output"], returncode=0, stdout='{"vm_ip":""}', stderr=""
+    )
     assert result.success is True
 
 
 def test_command_result_failure():
-    result = CommandResult(args=["tofu", "apply"], returncode=1, stdout="", stderr="error")
+    result = CommandResult(
+        args=["tofu", "apply"], returncode=1, stdout="", stderr="error"
+    )
     assert result.success is False
 
 
@@ -34,9 +39,7 @@ def test_fake_backend_returns_configured_response():
         stdout='{"vm_ip":{"value":"1.2.3.4"}}',
         stderr="",
     )
-    backend = FakeBackend(
-        responses={("tofu", "output", "-json"): expected}
-    )
+    backend = FakeBackend(responses={("tofu", "output", "-json"): expected})
     result = backend.run(["tofu", "output", "-json"])
     assert result.stdout == '{"vm_ip":{"value":"1.2.3.4"}}'
 
@@ -75,9 +78,11 @@ def test_fake_backend_cwd_is_recorded():
 
 def test_tofu_backend_raises_not_installed_on_file_not_found():
     backend = TofuBackend()
-    with patch("subprocess.run", side_effect=FileNotFoundError("tofu not found")):
-        with pytest.raises(TofuNotInstalledError) as exc_info:
-            backend.run(["tofu", "version"])
+    with (
+        patch("subprocess.run", side_effect=FileNotFoundError("tofu not found")),
+        pytest.raises(TofuNotInstalledError) as exc_info,
+    ):
+        backend.run(["tofu", "version"])
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
@@ -126,11 +131,15 @@ def test_fake_backend_last_env_empty():
 
 def test_tofu_backend_returns_command_result_on_success():
     backend = TofuBackend()
-    fake_proc = type("CompletedProcess", (), {
-        "returncode": 0,
-        "stdout": "ok",
-        "stderr": "",
-    })
+    fake_proc = type(
+        "CompletedProcess",
+        (),
+        {
+            "returncode": 0,
+            "stdout": "ok",
+            "stderr": "",
+        },
+    )
     with patch("subprocess.run", return_value=fake_proc):
         result = backend.run(["tofu", "version"])
     assert result.returncode == 0

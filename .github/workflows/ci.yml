@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint, format, types, security.
+  #
+  # Runs the same hooks as local development through pre-commit, so the two can
+  # not drift. This is the first CI this repository has had: it previously had
+  # no .github/workflows at all, so nothing was checked on push.
+  # ---------------------------------------------------------------------------
+  pre-commit:
+    name: pre-commit (ruff, basedpyright, bandit, import-linter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # ruff's target-version is py311 and basedpyright is pointed at the
+          # 3.11 venv, so linting on the declared floor is the honest choice.
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the project
+        run: uv sync --frozen
+
+      - name: Install pre-commit
+        run: python -m pip install --upgrade pip pre-commit
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
+
+  # ---------------------------------------------------------------------------
+  # Tests + coverage gate.
+  #
+  # pyproject.toml sets `addopts = "-m 'not integration'"`, so the tests that
+  # need real Azure credentials and OpenTofu stay out of this job. The coverage
+  # threshold lives in [tool.coverage.report] and is deliberately not repeated
+  # as a --cov-fail-under flag here: stating it in two places is how the two
+  # come to disagree, with the command-line flag silently winning.
+  # ---------------------------------------------------------------------------
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the declared floor (requires-python >=3.11).
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install project
+        run: uv sync --frozen
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore

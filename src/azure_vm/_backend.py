@@ -38,7 +38,9 @@ class TofuBackend:
         env: dict[str, str] | None = None,
     ) -> CommandResult:
         try:
-            proc = subprocess.run(args, capture_output=True, text=True, cwd=cwd, env=env)
+            proc = subprocess.run(
+                args, capture_output=True, text=True, cwd=cwd, env=env
+            )
         except FileNotFoundError as err:
             from .exceptions import TofuNotInstalledError
 
@@ -82,7 +84,7 @@ class FakeBackend:
         self._cwds.append(cwd)
         self._envs.append(env)
         key = tuple(args)
-        if key in self._queues and self._queues[key]:
+        if self._queues.get(key):
             return self._queues[key].pop(0)
         if key in self._responses:
             return self._responses[key]

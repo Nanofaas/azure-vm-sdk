@@ -14,9 +14,10 @@ Run with:
 """
 
 import os
-import pytest
-from azure_vm import AzureClient
 
+import pytest
+
+from azure_vm import AzureClient
 
 pytestmark = pytest.mark.integration
 
