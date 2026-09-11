@@ -34,7 +34,6 @@ from azure_vm.devtools.code_eval import (
     _check_mutable_defaults,
     _check_raise_without_from,
     _check_unused_exception_classes,
-    _check_unused_exceptions,
     format_report,
     main,
 )
@@ -260,14 +259,12 @@ def test_check_large_functions_covers_async_functions():
     assert smells[0].message == "Function `fetch()` is 10 lines (max recommended: 5)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: _check_mutable_defaults requires the default to be an ast.Constant "
-        "as well as an ast.List/Dict/Set, which no node can be, so it never fires"
-    ),
-)
 def test_check_mutable_defaults_flags_list_default():
+    """A list default is the case this check exists for.
+
+    It used to require `isinstance(default, ast.Constant)` as well as
+    `ast.List/Dict/Set`, which no node can satisfy, so the check never fired.
+    """
     source = "def f(items=[]):\n    return items\n"
     smells = _check_mutable_defaults("m.py", ast.parse(source), source)
     assert smells == [
@@ -286,20 +283,12 @@ def test_check_mutable_defaults_returns_empty_for_safe_defaults():
     assert _check_mutable_defaults("m.py", ast.parse(source), source) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: _check_unused_exceptions builds the `defined` set and then "
-        "discards it with `return []`, so its documented behaviour is never "
-        "implemented and it is not registered in ALL_CHECKS"
-    ),
-)
-def test_check_unused_exceptions_reports_unraised_class():
-    source = (
-        "class ThingError(Exception):\n    pass\n\n\nclass Helper(dict):\n    pass\n"
-    )
-    smells = _check_unused_exceptions("m.py", ast.parse(source), source)
-    assert smells, "an exception defined and never raised should be reported"
+# _check_unused_exceptions used to sit here as a stub: it built the set of
+# exception classes defined in one module and discarded it with a bare
+# `return []`. It was removed rather than implemented - a check that sees one
+# module at a time cannot know whether a class is raised somewhere else, and
+# _check_unused_exception_classes() does the whole-package analysis properly and
+# is the one registered in ALL_CHECKS.
 
 
 # ---------------------------------------------------------------------------

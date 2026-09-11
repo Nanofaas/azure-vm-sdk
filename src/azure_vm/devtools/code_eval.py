@@ -53,22 +53,6 @@ class Smell:
     message: str
 
 
-def _check_unused_exceptions(
-    module_path: str, tree: ast.AST, source: str
-) -> list[Smell]:
-    """Find exception classes that are defined but never raised in the codebase."""
-    defined: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            for base in node.bases:
-                base_name = (
-                    ast.unparse(base) if hasattr(ast, "unparse") else ast.dump(base)
-                )
-                if "Error" in base_name or "Exception" in base_name:
-                    defined.add(node.name)
-    return []
-
-
 def _check_bare_except(module_path: str, tree: ast.AST, source: str) -> list[Smell]:
     smells: list[Smell] = []
     for node in ast.walk(tree):
@@ -145,12 +129,13 @@ def _check_mutable_defaults(
                     line=default.lineno,
                     message=f"Mutable default argument in `{node.name}()`",
                 )
+                # `default` is None for keyword-only parameters that have no
+                # default, hence the truthiness test. There used to be a second
+                # condition here requiring `isinstance(default, ast.Constant)`,
+                # which no list, dict or set literal can ever satisfy - so this
+                # check reported nothing at all.
                 for default in node.args.defaults + node.args.kw_defaults
-                if (
-                    default
-                    and isinstance(default, mutable)
-                    and isinstance(default, ast.Constant)
-                )
+                if default and isinstance(default, mutable)
             )
     return smells
 
