@@ -8,7 +8,7 @@ Python SDK for managing Azure VMs via OpenTofu.
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ```bash
-uv sync --group dev
+uv sync
 ```
 
 ## Usage
@@ -135,10 +135,12 @@ SUCCESS — VM 'e2e-1747152000' completed full lifecycle.
 # Unit tests only (default, no Azure/OpenTofu needed)
 uv run pytest
 
-# Include integration tests (requires Azure + OpenTofu installed)
-uv run pytest -m "integration"
+# Include integration tests (requires Azure + OpenTofu installed).
+# --no-cov: the 80% coverage gate targets the unit suite, so it would fail on
+# an integration-only run.
+uv run pytest -m "integration" --no-cov
 
-# With coverage report
+# Coverage report (already on by default, with an 80% gate; shown explicitly)
 uv run pytest --cov=azure_vm --cov-report=term-missing
 ```
 
@@ -152,9 +154,12 @@ uv run azure-vm-quality
 Individual checks:
 
 ```bash
-uv run ruff check .            # Linting (pyflakes + private access)
-uv run basedpyright            # Type checking
-uv run lint-imports            # Architecture contract enforcement
+uv run ruff check .                    # Linting (pycodestyle, pyflakes, isort, bugbear, pyupgrade, pydocstyle, …)
+uv run ruff format .                   # Formatting
+uv run basedpyright                    # Type checking
+uv run bandit -c pyproject.toml -r src # Security static analysis
+uv run lint-imports                    # Architecture contract enforcement
+uv run pre-commit run --all-files      # Every hook above, all at once
 ```
 
 ## Code evaluation tools
@@ -202,8 +207,11 @@ Metrics:
 ### Dependency graph visualization
 
 ```bash
-uv run pydeps azure_vm --show-deps --max-bacon 2
+uv run pydeps azure_vm --show-deps --max-bacon 2 --nodot
 ```
+
+Rendering the diagram itself additionally needs Graphviz (`dot`) on `PATH`;
+`--nodot` skips that step and prints the dependency analysis as JSON.
 
 ## Architecture contracts
 
