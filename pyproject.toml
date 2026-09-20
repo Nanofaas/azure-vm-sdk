@@ -1,10 +1,26 @@
 [project]
 name = "azure-vm-sdk"
-version = "0.1.0"
+version = "0.6.0"
 description = "Python SDK for managing Azure VMs via OpenTofu"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [
+    { name = "miciav", email = "5889596+miciav@users.noreply.github.com" }
+]
+keywords = ["azure", "vm", "opentofu", "infrastructure", "devops"]
+# The three Python versions are the ones CI's matrix actually runs, not a wish.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+]
 requires-python = ">=3.11"
 dependencies = [
     "paramiko>=3.0",
@@ -16,6 +32,12 @@ azure-vm-quality = "azure_vm.devtools.quality:main"
 azure-vm-package-report = "azure_vm.devtools.package_report:main"
 azure-vm-eval = "azure_vm.devtools.code_eval:main"
 azure-vm-e2e = "azure_vm.e2e:main"
+
+# PyPI shows a package page with no link home at all without these.
+[project.urls]
+Homepage = "https://github.com/Nanofaas/azure-vm-sdk"
+Repository = "https://github.com/Nanofaas/azure-vm-sdk"
+Issues = "https://github.com/Nanofaas/azure-vm-sdk/issues"
 
 [dependency-groups]
 dev = [
