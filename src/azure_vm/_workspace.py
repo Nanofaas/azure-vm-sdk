@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -26,6 +27,9 @@ class Workspace:
     def __init__(self, root: Path, backend: CommandBackend) -> None:
         self._root = root
         self._backend = backend
+        # launch_many's threads share one .shared state: one apply at a time,
+        # and none may start its VM before the shared infra exists.
+        self._shared_lock = threading.Lock()
 
     # ------------------------------------------------------------------- paths
 
@@ -47,15 +51,23 @@ class Workspace:
             location=location,
         )
         main_tf = shared / "main.tf"
-        # Re-render from the current configuration: an existing workspace must
-        # never silently pin stale parameters. Re-apply only on actual change.
-        if main_tf.exists() and main_tf.read_text() == hcl:
-            return
-        shared.mkdir(parents=True, exist_ok=True)
-        main_tf.write_text(hcl)
-        run_command(self._backend, ["tofu", "init"], cwd=str(shared))
-        _try_import_resource_group(self._backend, shared, resource_group)
-        run_command(self._backend, ["tofu", "apply", "-auto-approve"], cwd=str(shared))
+        with self._shared_lock:
+            # Re-render from the current configuration: an existing workspace must
+            # never silently pin stale parameters. Re-apply only on actual change.
+            if main_tf.exists() and main_tf.read_text() == hcl:
+                return
+            shared.mkdir(parents=True, exist_ok=True)
+            main_tf.write_text(hcl)
+            try:
+                run_command(self._backend, ["tofu", "init"], cwd=str(shared))
+                _try_import_resource_group(self._backend, shared, resource_group)
+                run_command(
+                    self._backend, ["tofu", "apply", "-auto-approve"], cwd=str(shared)
+                )
+            except BaseException:
+                # main.tf marks an applied config: without it the next launch retries.
+                main_tf.unlink(missing_ok=True)
+                raise
 
     # --------------------------------------------------------------- vm ops
 

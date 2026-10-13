@@ -147,7 +147,6 @@ class AzureClient:
             return []
 
         workers = max_workers if max_workers is not None else len(configs)
-        created: list[AzureVM] = []
         first_error: BaseException | None = None
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -166,16 +165,19 @@ class AzureClient:
             }
 
             for fut in as_completed(futures):
-                if first_error is not None:
+                if fut.cancelled():
                     continue
                 exc = fut.exception()
-                if exc is not None:
+                if exc is not None and first_error is None:
                     first_error = exc
                     for pending in futures:
                         pending.cancel()
-                else:
-                    created.append(fut.result())
 
+        # Every launch has ended here: a VM that came up after the first failure
+        # is rolled back too, never left running unrecorded.
+        created = [
+            f.result() for f in futures if not f.cancelled() and f.exception() is None
+        ]
         if first_error is not None:
             with ThreadPoolExecutor(max_workers=max(len(created), 1)) as rollback:
                 for rf in [rollback.submit(vm.delete) for vm in created]:

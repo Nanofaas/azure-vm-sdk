@@ -927,3 +927,132 @@ def test_list_sizes_raises_when_no_location():
     )
     assert exc_info.value.returncode == -1
     assert backend.calls == []
+
+
+class _GatedBackend(FakeBackend):
+    """FakeBackend whose ``run`` first calls ``gate(args, cwd)`` (to block or fail)."""
+
+    def __init__(self, gate) -> None:
+        super().__init__()
+        self.set_default(make_ok())
+        self._gate = gate
+
+    def run(self, args, *, cwd=None, env=None):
+        result = self._gate(list(args), cwd)
+        super().run(args, cwd=cwd, env=env)
+        return result if result is not None else make_ok()
+
+
+def test_launch_many_applies_shared_infra_once_before_any_vm(tmp_path):
+    import threading
+    import time
+
+    ws = tmp_path / "azure-vm-sdk"
+    ws.mkdir()
+    shared = str(ws / ".shared")
+    lock = threading.Lock()
+    state = {"applying": 0, "applies": 0, "done": False, "vm_before_shared": []}
+
+    def gate(args, cwd):
+        if cwd == shared and args == ["tofu", "apply", "-auto-approve"]:
+            with lock:
+                state["applying"] += 1
+                state["applies"] += 1
+                if state["applying"] > 1:  # OpenTofu's state lock
+                    state["applying"] -= 1
+                    return make_err("Error acquiring the state lock")
+            time.sleep(0.3)
+            with lock:
+                state["applying"] -= 1
+                state["done"] = True
+        elif (
+            cwd not in (shared, None) and args == ["tofu", "init"] and not state["done"]
+        ):
+            state["vm_before_shared"].append(cwd)
+        if args[:2] == ["tofu", "output"]:
+            return make_ok(OUTPUT_JSON)
+        return None
+
+    client = AzureClient(
+        resource_group="my-rg",
+        location="westeurope",
+        work_dir=str(ws),
+        backend=_GatedBackend(gate),
+    )
+    vms = client.launch_many([VmConfig(name=f"vm-{i}") for i in range(4)])
+    assert len(vms) == 4
+    assert state["applies"] == 1
+    assert state["vm_before_shared"] == []
+
+
+def test_launch_many_rolls_back_a_vm_that_finishes_after_the_failure(tmp_path):
+    import threading
+
+    ws = tmp_path / "azure-vm-sdk"
+    ws.mkdir()
+    failed = threading.Event()
+
+    def gate(args, cwd):
+        if args == ["tofu", "apply", "-auto-approve"]:
+            if cwd == str(ws / "vm-b"):
+                failed.set()
+                return make_err("apply exploded")
+            if cwd == str(ws / "vm-a"):
+                failed.wait(5)  # vm-a comes up only after vm-b's failure is known
+        if args[:2] == ["tofu", "output"]:
+            return make_ok(OUTPUT_JSON)
+        return None
+
+    backend = _GatedBackend(gate)
+    client = AzureClient(
+        resource_group="my-rg", location="westeurope", work_dir=str(ws), backend=backend
+    )
+    client.launch(name="prewarm")  # shared infra in place
+    with pytest.raises(AzureVmCommandError, match="apply exploded"):
+        client.launch_many([VmConfig(name="vm-a"), VmConfig(name="vm-b")])
+    destroys = [
+        cwd
+        for call, cwd in zip(backend.calls, backend.cwds, strict=True)
+        if call == ["tofu", "destroy", "-auto-approve"]
+    ]
+    assert destroys == [str(ws / "vm-a")]
+
+
+def test_failed_shared_apply_is_retried_on_the_next_launch(tmp_path):
+    ws = tmp_path / "azure-vm-sdk"
+    ws.mkdir()
+    backend = FakeBackend()
+    backend.set_default(make_ok())
+    backend.push("tofu", "apply", "-auto-approve", result=make_err("quota"))
+    client = AzureClient(
+        resource_group="my-rg", location="westeurope", work_dir=str(ws), backend=backend
+    )
+    with pytest.raises(AzureVmCommandError, match="quota"):
+        client.launch(name="vm-a")
+    before = len(backend.calls)
+    backend.push("tofu", "output", "-json", result=make_ok(OUTPUT_JSON))
+    client.launch(name="vm-a")
+    shared_applies = [
+        cwd
+        for call, cwd in list(zip(backend.calls, backend.cwds, strict=True))[before:]
+        if call == ["tofu", "apply", "-auto-approve"] and cwd == str(ws / ".shared")
+    ]
+    assert shared_applies == [str(ws / ".shared")]
+
+
+def test_launch_many_reports_the_failure_not_the_cancelled_launches(tmp_path):
+    ws = tmp_path / "azure-vm-sdk"
+    ws.mkdir()
+    backend = FakeBackend()
+    backend.set_default(make_ok())
+    client = AzureClient(
+        resource_group="my-rg", location="westeurope", work_dir=str(ws), backend=backend
+    )
+    client.launch(name="prewarm")
+    backend.push("tofu", "apply", "-auto-approve", result=make_err("apply exploded"))
+    # One worker: vm-b and vm-c are still queued when vm-a fails, and get cancelled.
+    with pytest.raises(AzureVmCommandError, match="apply exploded"):
+        client.launch_many(
+            [VmConfig(name=n) for n in ("vm-a", "vm-b", "vm-c")], max_workers=1
+        )
+    assert not (ws / "vm-c").exists()
