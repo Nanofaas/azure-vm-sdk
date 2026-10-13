@@ -1,6 +1,6 @@
 [project]
 name = "azure-vm-sdk"
-version = "0.6.0"
+version = "0.6.1"
 description = "Python SDK for managing Azure VMs via OpenTofu"
 readme = "README.md"
 license = "MIT"
