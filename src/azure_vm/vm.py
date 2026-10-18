@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import logging
+import random
 import shlex
 import shutil
 import socket
@@ -11,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import paramiko
+from paramiko.ssh_exception import IncompatiblePeer, NoValidConnectionsError
 
 from ._backend import CommandBackend, CommandResult, run_command
 from .exceptions import (
@@ -18,6 +22,33 @@ from .exceptions import (
     SshConnectionError,
 )
 from .models import VmInfo
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _retryable_ssh_error(error: BaseException) -> bool:
+    """Identify transient connection failures, leaving credentials errors fatal."""
+    if isinstance(
+        error,
+        (
+            paramiko.AuthenticationException,
+            paramiko.BadHostKeyException,
+            paramiko.PasswordRequiredException,
+            IncompatiblePeer,
+        ),
+    ):
+        return False
+    if isinstance(error, NoValidConnectionsError):
+        return bool(error.errors) and all(
+            _retryable_ssh_error(cause) for cause in error.errors.values()
+        )
+    if isinstance(error, (ConnectionError, TimeoutError, EOFError)):
+        return True
+    if isinstance(error, OSError):
+        return error.errno in {errno.EHOSTUNREACH, errno.ENETUNREACH}
+    return isinstance(error, paramiko.SSHException) and str(error).startswith(
+        "Error reading SSH protocol banner"
+    )
 
 
 class AzureVM:
@@ -37,13 +68,22 @@ class AzureVM:
         ssh_connect_timeout: float = 15.0,
         ssh_keepalive_interval: float = 30.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
+        ssh_connect_attempts: int = 6,
     ) -> None:
         """Bind the handle to a VM name, workspace directory and command backend.
 
         ``ssh_client_id`` is the client banner paramiko announces during the
         handshake; ``None`` leaves paramiko's own default in place. A
         ``ssh_keepalive_interval`` of zero disables keepalive probes.
+        ``ssh_connect_attempts`` limits transient connection retries (default 6);
+        one disables retries. The backoff doubles from 1 to 10 seconds, with
+        jitter between half and all of that delay. ``ssh_connect_timeout``
+        limits each TCP connect, banner and authentication wait separately.
+        Remote commands are never retried.
         """
+        if ssh_connect_attempts < 1:
+            raise ValueError("ssh_connect_attempts must be at least 1")
+        self._ssh_connect_attempts = ssh_connect_attempts
         self.name = name
         self._workspace_dir = workspace_dir
         self._backend = backend
@@ -127,24 +167,41 @@ class AzureVM:
             # paramiko exposes no public API for the client id; this class
             # field is the documented override point.
             paramiko.Transport._CLIENT_ID = self._ssh_client_id  # type: ignore[attr-defined]  # noqa: SLF001
-        ssh = paramiko.SSHClient()
-        # The VM was just created, so its host key cannot be in known_hosts and
-        # there is no trusted channel to verify it over. AutoAddPolicy therefore
-        # accepts whatever key the peer presents on this first connection, which
-        # also accepts a machine-in-the-middle between the SDK and the VM. The
-        # alternative — pinning the key out of band — is left to the caller;
-        # silently failing every connection to a new VM would be worse.
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
-        try:
-            ssh.connect(
-                hostname=ip,
-                username=self._ssh_username,
-                key_filename=self._ssh_key_path,
-                timeout=self._ssh_connect_timeout,
-            )
-        except (OSError, paramiko.SSHException) as e:
-            ssh.close()
-            raise SshConnectionError(self.name, ip, str(e)) from e
+        attempt = 0
+        backoff = 1.0
+        while True:
+            attempt += 1
+            ssh = paramiko.SSHClient()
+            # First connection to a newly created VM has no pinned host key.
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
+            try:
+                ssh.connect(
+                    hostname=ip,
+                    username=self._ssh_username,
+                    key_filename=self._ssh_key_path,
+                    timeout=self._ssh_connect_timeout,
+                    banner_timeout=self._ssh_connect_timeout,
+                    auth_timeout=self._ssh_connect_timeout,
+                )
+                break
+            except (EOFError, OSError, paramiko.SSHException) as error:
+                ssh.close()
+                if attempt >= self._ssh_connect_attempts or not _retryable_ssh_error(
+                    error
+                ):
+                    raise SshConnectionError(self.name, ip, str(error)) from error
+                delay = random.uniform(backoff / 2, backoff)  # nosec B311 - scheduling jitter
+                _LOGGER.warning(
+                    "SSH connection to %s (%s) failed; attempt %d/%d in %.1fs: %s",
+                    self.name,
+                    ip,
+                    attempt + 1,
+                    self._ssh_connect_attempts,
+                    delay,
+                    error,
+                )
+                time.sleep(delay)
+                backoff = min(backoff * 2, 10.0)
         # Enable keepalive so a silently-dropped connection surfaces as an
         # error within a few missed probes instead of blocking forever in
         # recv_exit_status(). Long-lived commands (load tests, image builds)

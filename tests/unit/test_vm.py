@@ -168,6 +168,8 @@ def test_exec_runs_command_over_ssh(mock_ssh_client):
         username="azureuser",
         key_filename="/key.pem",
         timeout=15.0,
+        banner_timeout=15.0,
+        auth_timeout=15.0,
     )
     # a silent peer drop must surface, not hang: keepalive is enabled
     ssh.get_transport.return_value.set_keepalive.assert_called_once_with(30.0)

@@ -31,6 +31,7 @@ class AzureClient:
         ssh_connect_timeout: float = 15.0,
         ssh_keepalive_interval: float = 30.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
+        ssh_connect_attempts: int = 6,
     ) -> None:
         """Configure the client and locate the workspace root it manages.
 
@@ -41,6 +42,9 @@ class AzureClient:
         ``work_dir`` defaults to ``~/.azure-vm-sdk`` and ``backend`` to a real
         ``TofuBackend``.
         """
+        if ssh_connect_attempts < 1:
+            raise ValueError("ssh_connect_attempts must be at least 1")
+        self._ssh_connect_attempts = ssh_connect_attempts
         self._resource_group = resource_group
         self._location = location
         self._backend: CommandBackend = backend or TofuBackend()
@@ -72,6 +76,7 @@ class AzureClient:
             ssh_connect_timeout=self._ssh_connect_timeout,
             ssh_keepalive_interval=self._ssh_keepalive_interval,
             ssh_client_id=self._ssh_client_id,
+            ssh_connect_attempts=self._ssh_connect_attempts,
         )
 
     # --------------------------------------------------------------- launch

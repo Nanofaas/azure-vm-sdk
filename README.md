@@ -24,6 +24,19 @@ print(vm.info())
 vm.delete()
 ```
 
+### SSH connection retries
+
+SSH connections retry transient network failures up to six times by default.
+The delay doubles from 1 second to a 10-second cap, with jitter between half
+and all of each delay. Failed sessions are closed before the next attempt.
+Authentication, host-key and configuration errors fail immediately; commands
+that have already started are never replayed.
+
+Set `ssh_connect_attempts` on `AzureClient` or `AzureVM` to change the attempt
+limit (`1` disables retries). `ssh_connect_timeout` defaults to 15 seconds
+and limits each TCP connect, SSH banner and authentication wait separately.
+A new connection is also retried when reconnecting an expired cached session.
+
 ### Multiple VMs in parallel
 
 Use `launch_many` to create N VMs simultaneously. All VMs are provisioned in
