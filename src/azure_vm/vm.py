@@ -7,6 +7,7 @@ import shlex
 import shutil
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import paramiko
@@ -164,12 +165,24 @@ class AzureVM:
         ssh = self._ssh_client()
         try:
             _, stdout, stderr = ssh.exec_command(shlex.join(command))
+            # Drain both streams before waiting for exit: they share a bounded
+            # SSH window, so either unread stream can block the remote process.
+            with ThreadPoolExecutor(max_workers=2) as readers:
+                output = readers.submit(stdout.read)
+                errors = readers.submit(stderr.read)
+                try:
+                    for reader in as_completed((output, errors)):
+                        reader.result()
+                    output_bytes, error_bytes = output.result(), errors.result()
+                except BaseException:
+                    stdout.channel.close()
+                    raise
             exit_status = stdout.channel.recv_exit_status()
             return CommandResult(
                 args=command,
                 returncode=exit_status,
-                stdout=stdout.read().decode("utf-8", errors="replace"),
-                stderr=stderr.read().decode("utf-8", errors="replace"),
+                stdout=output_bytes.decode("utf-8", errors="replace"),
+                stderr=error_bytes.decode("utf-8", errors="replace"),
             )
         except (EOFError, OSError, paramiko.SSHException):
             self.close()
