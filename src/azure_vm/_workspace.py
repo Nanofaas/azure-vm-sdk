@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from ._backend import CommandBackend, run_command
+from ._disks import destroy_with_disk_cleanup
 from ._templates import (
     SHARED_TEMPLATE,
     VM_TEMPLATE,
@@ -162,11 +163,7 @@ class Workspace:
     def purge(self) -> None:
         """Destroy all VM workspaces (preserving .shared/)."""
         for vm_dir_item in self.iter_vm_workspaces():
-            run_command(
-                self._backend,
-                ["tofu", "destroy", "-auto-approve"],
-                cwd=str(vm_dir_item),
-            )
+            destroy_with_disk_cleanup(vm_dir_item, self._backend)
 
 
 def _try_import_resource_group(

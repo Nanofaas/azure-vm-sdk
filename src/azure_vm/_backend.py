@@ -42,8 +42,12 @@ class TofuBackend:
                 args, capture_output=True, text=True, cwd=cwd, env=env
             )
         except FileNotFoundError as err:
-            from .exceptions import TofuNotInstalledError
+            from .exceptions import AzureVmCommandError, TofuNotInstalledError
 
+            if args[0] != "tofu":
+                raise AzureVmCommandError(
+                    args, 127, "", f"{args[0]} not found: {err}"
+                ) from err
             raise TofuNotInstalledError() from err
         return CommandResult(
             args=args,

@@ -6,6 +6,7 @@ import errno
 import json
 import logging
 import random
+import re
 import shlex
 import shutil
 import socket
@@ -17,6 +18,7 @@ import paramiko
 from paramiko.ssh_exception import IncompatiblePeer, NoValidConnectionsError
 
 from ._backend import CommandBackend, CommandResult, run_command
+from ._disks import LEDGER, apply_with_disk_tracking, destroy_with_disk_cleanup
 from .exceptions import (
     AzureVmTimeoutError,
     SshConnectionError,
@@ -95,6 +97,8 @@ class AzureVM:
         self._ssh: paramiko.SSHClient | None = None
 
     def _run(self, args: list[str]) -> CommandResult:
+        if args[:2] == ["tofu", "apply"]:
+            return apply_with_disk_tracking(self._workspace_dir, self._backend, args)
         return run_command(self._backend, args, cwd=str(self._workspace_dir))
 
     def _ip(self) -> str:
@@ -129,8 +133,12 @@ class AzureVM:
         self._run(["tofu", "apply", "-auto-approve", "-var", "desired_state=restart"])
 
     def delete(self) -> None:
-        """Destroy the workspace, removing the VM and its Azure resources."""
-        self._run(["tofu", "destroy", "-auto-approve"])
+        """Destroy the VM, then remove its recorded detached orphan OS disks.
+
+        Failed cleanup preserves the registry for retry. Disks with changed
+        identity or active attachments are never deleted by orphan cleanup.
+        """
+        destroy_with_disk_cleanup(self._workspace_dir, self._backend)
 
     # ---------------------------------------------------------------- SSH
 
@@ -294,18 +302,35 @@ class AzureVM:
         """Copy this VM's workspace to ``new_name`` and apply it.
 
         The sibling directory ``<parent>/<new_name>`` receives a copy of the
-        current workspace, then ``tofu apply`` creates a VM named ``new_name``
+        current configuration (excluding state and disk ownership), then
+        ``tofu init/apply`` creates a VM named ``new_name``
         within it. The returned handle reuses this VM's backend, SSH key and
         username, but starts with its own connection and default SSH timing.
         """
         new_ws = self._workspace_dir.parent / new_name
         if self._workspace_dir.exists():
-            shutil.copytree(self._workspace_dir, new_ws, dirs_exist_ok=True)
+            shutil.copytree(
+                self._workspace_dir,
+                new_ws,
+                ignore=shutil.ignore_patterns(
+                    "terraform.tfstate*",
+                    ".terraform",
+                    ".terraform.tfstate.lock.info",
+                    LEDGER,
+                    LEDGER + ".tmp",
+                ),
+            )
         else:
             new_ws.mkdir(parents=True, exist_ok=True)
-        self._backend.run(
+        tfvars = new_ws / "terraform.tfvars"
+        content = tfvars.read_text() if tfvars.exists() else ""
+        content = re.sub(r"(?m)^vm_name\s*=.*$", "", content)
+        tfvars.write_text(content + f'\nvm_name = "{new_name}"\n')
+        run_command(self._backend, ["tofu", "init"], cwd=str(new_ws))
+        apply_with_disk_tracking(
+            new_ws,
+            self._backend,
             ["tofu", "apply", "-auto-approve", "-var", f"vm_name={new_name}"],
-            cwd=str(new_ws),
         )
         return AzureVM(
             new_name,

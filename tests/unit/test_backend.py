@@ -144,3 +144,13 @@ def test_tofu_backend_returns_command_result_on_success():
         result = backend.run(["tofu", "version"])
     assert result.returncode == 0
     assert result.stdout == "ok"
+
+
+def test_missing_azure_cli_is_not_reported_as_missing_tofu():
+    from azure_vm.exceptions import AzureVmCommandError
+
+    with (
+        patch("subprocess.run", side_effect=FileNotFoundError("az not found")),
+        pytest.raises(AzureVmCommandError, match=r"az.*not found"),
+    ):
+        TofuBackend().run(["az", "disk", "show", "--ids", "/disk"])

@@ -13,6 +13,7 @@ from pathlib import Path
 from ._backend import CommandBackend, TofuBackend, run_command
 from ._discovery import list_images
 from ._discovery import list_sizes as _list_sizes
+from ._disks import apply_with_disk_tracking
 from ._workspace import Workspace
 from .exceptions import AzureVmCommandError, VmNotFoundError
 from .models import ImageInfo, VmConfig, VmInfo, VmSize, VmState
@@ -152,7 +153,9 @@ class AzureClient:
 
         wdir = str(self._workspace.vm_dir(name))
         run_command(self._backend, ["tofu", "init"], cwd=wdir)
-        run_command(self._backend, ["tofu", "apply", "-auto-approve"], cwd=wdir)
+        apply_with_disk_tracking(
+            Path(wdir), self._backend, ["tofu", "apply", "-auto-approve"]
+        )
 
         return self.get_vm(name)
 

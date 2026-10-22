@@ -95,6 +95,30 @@ for vm in vms:
 vms = client.launch_many(configs, max_workers=4)
 ```
 
+### OS disk cleanup after eviction
+
+`vm.delete()` and `client.purge()` also clean up orphan managed OS disks when
+Azure has already deleted a Spot VM. Each VM workspace keeps `sdk-os-disks.json`
+with exact disk resource IDs and Azure `uniqueId` values, captured before and
+after applies. Replacement retains both generations until cleanup succeeds.
+
+Cleanup uses the authenticated Azure CLI (`az disk show/delete`). It deletes a
+recorded disk only when its identity is unchanged, `diskState` is `Unattached`,
+and both `managedBy` and `managedByExtended` are empty. It never scans the
+subscription for name matches, touches user data disks, or force-detaches disks.
+Missing disks are success; authorization, network, identity and attachment errors
+are reported and unresolved entries remain available for retry. Call `delete()`
+or `purge()` again after resolving the error.
+
+Keep the workspace and its disk registry until cleanup completes. Older local
+workspaces can recover disk IDs from their retained VM state (including AzureRM
+versions before 4.15). If both the state and registry have already been lost,
+the SDK cannot establish ownership and cannot recover those orphan disks.
+Unverified registry entries without supporting VM state require manual
+reconciliation. Lifecycle operations on the same workspace must be serialized;
+parallel creation/deletion of different VM workspaces is supported. Clones copy
+configuration only, with independent state and disk ownership.
+
 ### Progressive Spot creation
 
 `launch_many_iter(configs, max_workers=8)` yields an exported `LaunchResult`
