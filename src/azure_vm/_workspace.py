@@ -85,6 +85,9 @@ class Workspace:
         ssh_username: str,
         default_ssh_key: str | None = None,
         open_ports=None,
+        priority: str = "Regular",
+        eviction_policy: str | None = None,
+        max_bid_price: float | None = None,
     ) -> None:
         workspace = self.vm_dir(name)
         workspace.mkdir(parents=True, exist_ok=True)
@@ -94,6 +97,15 @@ class Workspace:
         effective_ssh_path = resolve_ssh_path(ssh_key_path, default_ssh_key)
 
         full_urn = image_urn or "Canonical:ubuntu-24_04-lts:server-gen1:latest"
+
+        spot_block = ""
+        if priority == "Spot":
+            spot_block = (
+                '  priority = "Spot"\n'
+                f'  eviction_policy = "{eviction_policy or "Delete"}"\n'
+            )
+            if max_bid_price is not None:
+                spot_block += f"  max_bid_price = {max_bid_price}\n"
 
         hcl = VM_TEMPLATE.format(
             resource_group=resource_group,
@@ -107,6 +119,7 @@ class Workspace:
             image_urn=full_urn,
             custom_data_block=cloud_init_block,
             extra_security_rules=render_security_rules(open_ports),
+            spot_block=spot_block,
         )
         (workspace / "main.tf").write_text(hcl)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -140,6 +141,28 @@ class VmConfig:
     cloud_init_config: dict | str | None = None
     ssh_key_path: str | None = None
     open_ports: tuple[int, ...] | None = None
+    priority: str = "Regular"
+    eviction_policy: str | None = None
+    max_bid_price: float | None = None
+
+    def __post_init__(self) -> None:
+        """Reject invalid Spot settings before any resources are created."""
+        if self.priority not in ("Regular", "Spot"):
+            raise ValueError("priority must be Regular or Spot")
+        if self.eviction_policy not in (None, "Delete", "Deallocate"):
+            raise ValueError("eviction_policy must be Delete or Deallocate")
+        if self.priority != "Spot" and (
+            self.eviction_policy is not None or self.max_bid_price is not None
+        ):
+            raise ValueError("eviction_policy and max_bid_price require Spot priority")
+        price = self.max_bid_price
+        if price is not None and (
+            isinstance(price, bool)
+            or not isinstance(price, (int, float))
+            or not math.isfinite(price)
+            or (price != -1 and price < 0)
+        ):
+            raise ValueError("max_bid_price must be -1 or a finite non-negative number")
 
 
 @dataclass

@@ -112,7 +112,7 @@ resource "azurerm_linux_virtual_machine" "vm" {{
   computer_name         = var.vm_name
   admin_username        = "{ssh_username}"
   disable_password_authentication = true
-
+{spot_block}
   admin_ssh_key {{
     username   = "{ssh_username}"
     public_key = file("{ssh_public_key_path}")

@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Generator
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ._backend import CommandBackend, TofuBackend, run_command
@@ -15,6 +17,15 @@ from ._workspace import Workspace
 from .exceptions import AzureVmCommandError, VmNotFoundError
 from .models import ImageInfo, VmConfig, VmInfo, VmSize, VmState
 from .vm import AzureVM
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    """Outcome for one incremental launch; exactly one of vm/error is set."""
+
+    config: VmConfig
+    vm: AzureVM | None = None
+    error: Exception | None = None
 
 
 class AzureClient:
@@ -91,6 +102,9 @@ class AzureClient:
         cloud_init_config: dict | str | None = None,
         ssh_key_path: str | None = None,
         open_ports: list[int] | tuple[int, ...] | None = None,
+        priority: str = "Regular",
+        eviction_policy: str | None = None,
+        max_bid_price: float | None = None,
     ) -> AzureVM:
         """Create one VM and return a handle to it.
 
@@ -98,8 +112,15 @@ class AzureClient:
         The workspace templates are written from the given configuration,
         then ``tofu init`` and ``tofu apply`` run to create the VM. Raises
         ``AzureVmCommandError`` when the client has no ``resource_group`` or
-        ``location``.
+        ``location``. Spot priority defaults to Delete eviction; omitted bid
+        uses the provider default of -1. Invalid Spot settings raise ValueError
+        before any resource is created.
         """
+        VmConfig(
+            priority=priority,
+            eviction_policy=eviction_policy,
+            max_bid_price=max_bid_price,
+        )
         if not self._resource_group or not self._location:
             raise AzureVmCommandError(
                 [],
@@ -124,6 +145,9 @@ class AzureClient:
             ssh_username=self._ssh_username,
             default_ssh_key=self._ssh_key_path,
             open_ports=open_ports,
+            priority=priority,
+            eviction_policy=eviction_policy,
+            max_bid_price=max_bid_price,
         )
 
         wdir = str(self._workspace.vm_dir(name))
@@ -151,6 +175,7 @@ class AzureClient:
         if not configs:
             return []
 
+        configs = [replace(cfg) for cfg in configs]
         workers = max_workers if max_workers is not None else len(configs)
         first_error: BaseException | None = None
 
@@ -165,6 +190,9 @@ class AzureClient:
                     cloud_init_config=cfg.cloud_init_config,
                     ssh_key_path=cfg.ssh_key_path,
                     open_ports=cfg.open_ports,
+                    priority=cfg.priority,
+                    eviction_policy=cfg.eviction_policy,
+                    max_bid_price=cfg.max_bid_price,
                 ): cfg
                 for cfg in configs
             }
@@ -193,6 +221,65 @@ class AzureClient:
             raise first_error
 
         return created
+
+    def launch_many_iter(
+        self,
+        configs: list[VmConfig],
+        *,
+        max_workers: int = 8,
+    ) -> Generator[LaunchResult, None, None]:
+        """Yield individual launch outcomes as they complete, without rollback.
+
+        At most ``max_workers`` launches are submitted at once. Configurations
+        are validated before submission; duplicate names are rejected. Omitted
+        names are generated and included in the outcome's configuration.
+
+        Use ``contextlib.closing`` when iteration may stop early. Closing stops
+        submissions, cancels unstarted futures and waits for running launches.
+        Those resources and their workspaces remain available, even when their
+        outcomes were not consumed. For durable recovery, give every config an
+        explicit name and persist those names before starting iteration. Failed
+        applies may also leave partial resources: reconcile/destroy their named
+        workspaces. Closing cannot interrupt an already running OpenTofu call.
+        """
+        if (
+            isinstance(max_workers, bool)
+            or not isinstance(max_workers, int)
+            or max_workers < 1
+        ):
+            raise ValueError("max_workers must be a positive integer")
+        prepared = [
+            replace(cfg, name=cfg.name or uuid.uuid4().hex[:8]) for cfg in configs
+        ]
+        if len({cfg.name for cfg in prepared}) != len(prepared):
+            raise ValueError("launch_many_iter requires unique VM names")
+        if not prepared:
+            return
+
+        remaining = iter(prepared)
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        pending = {}
+        try:
+            for cfg in remaining:
+                pending[executor.submit(self.launch, **vars(cfg))] = cfg
+                if len(pending) == max_workers:
+                    break
+            while pending:
+                completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    cfg = pending.pop(future)
+                    try:
+                        result = LaunchResult(config=cfg, vm=future.result())
+                    except Exception as error:
+                        result = LaunchResult(config=cfg, error=error)
+                    yield result
+                    following = next(remaining, None)
+                    if following is not None:
+                        pending[executor.submit(self.launch, **vars(following))] = (
+                            following
+                        )
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
 
     # ---------------------------------------------------------------- list
 
@@ -243,6 +330,9 @@ class AzureClient:
         cloud_init_config: dict | str | None = None,
         ssh_key_path: str | None = None,
         open_ports: list[int] | tuple[int, ...] | None = None,
+        priority: str = "Regular",
+        eviction_policy: str | None = None,
+        max_bid_price: float | None = None,
     ) -> AzureVM:
         """Return a handle to ``name``, creating or starting the VM as needed.
 
@@ -260,8 +350,16 @@ class AzureClient:
                 cloud_init_config=cloud_init_config,
                 ssh_key_path=ssh_key_path,
                 open_ports=open_ports,
+                priority=priority,
+                eviction_policy=eviction_policy,
+                max_bid_price=max_bid_price,
             )
 
+        VmConfig(
+            priority=priority,
+            eviction_policy=eviction_policy,
+            max_bid_price=max_bid_price,
+        )
         if not self._resource_group or not self._location:
             raise AzureVmCommandError(
                 [],
@@ -286,6 +384,9 @@ class AzureClient:
             ssh_username=self._ssh_username,
             default_ssh_key=self._ssh_key_path,
             open_ports=open_ports,
+            priority=priority,
+            eviction_policy=eviction_policy,
+            max_bid_price=max_bid_price,
         )
 
         vm = self.get_vm(name)
@@ -300,6 +401,9 @@ class AzureClient:
                 cloud_init_config=cloud_init_config,
                 ssh_key_path=ssh_key_path,
                 open_ports=open_ports,
+                priority=priority,
+                eviction_policy=eviction_policy,
+                max_bid_price=max_bid_price,
             )
 
         if info.state == VmState.RUNNING:

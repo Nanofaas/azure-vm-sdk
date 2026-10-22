@@ -1,7 +1,7 @@
 """Public API for creating and managing Azure VMs through OpenTofu."""
 
 from ._backend import CommandResult
-from .client import AzureClient
+from .client import AzureClient, LaunchResult
 from .exceptions import (
     AzureVmCommandError,
     AzureVmError,
@@ -21,6 +21,7 @@ __all__ = [
     "AzureVmTimeoutError",
     "CommandResult",
     "ImageInfo",
+    "LaunchResult",
     "SshConnectionError",
     "TofuNotInstalledError",
     "VmArchitecture",
