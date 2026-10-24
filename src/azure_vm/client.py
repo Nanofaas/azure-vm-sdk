@@ -44,6 +44,7 @@ class AzureClient:
         ssh_keepalive_interval: float = 30.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
         ssh_connect_attempts: int = 6,
+        manage_resource_group: bool = True,
     ) -> None:
         """Configure the client and locate the workspace root it manages.
 
@@ -52,8 +53,14 @@ class AzureClient:
         that want the ``AZURE_*`` variables must pass their values in. All
         ``ssh_*`` arguments are handed to every VM the client creates.
         ``work_dir`` defaults to ``~/.azure-vm-sdk`` and ``backend`` to a real
-        ``TofuBackend``.
+        ``TofuBackend``. Set ``manage_resource_group=False`` to use an existing
+        resource group without importing, creating or updating it. Each region
+        should use its own workspace; VM resources use ``location`` independently
+        of the resource group location.
         """
+        if not isinstance(manage_resource_group, bool):
+            raise ValueError("manage_resource_group must be a boolean")
+        self._manage_resource_group = manage_resource_group
         if ssh_connect_attempts < 1:
             raise ValueError("ssh_connect_attempts must be at least 1")
         self._ssh_connect_attempts = ssh_connect_attempts
@@ -133,7 +140,11 @@ class AzureClient:
         if name is None:
             name = uuid.uuid4().hex[:8]
 
-        self._workspace.ensure_shared_infra(self._resource_group, self._location)
+        self._workspace.ensure_shared_infra(
+            self._resource_group,
+            self._location,
+            manage_resource_group=self._manage_resource_group,
+        )
         self._workspace.write_vm_workspace(
             name=name,
             vm_size=vm_size,
@@ -374,7 +385,11 @@ class AzureClient:
         # Re-render the workspace from the CURRENT configuration: a pre-existing
         # workspace must never silently pin stale parameters (e.g. an old
         # resource group baked into main.tf by a previous run).
-        self._workspace.ensure_shared_infra(self._resource_group, self._location)
+        self._workspace.ensure_shared_infra(
+            self._resource_group,
+            self._location,
+            manage_resource_group=self._manage_resource_group,
+        )
         self._workspace.write_vm_workspace(
             name=name,
             vm_size=vm_size,

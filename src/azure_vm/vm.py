@@ -138,7 +138,7 @@ class AzureVM:
         Failed cleanup preserves the registry for retry. Disks with changed
         identity or active attachments are never deleted by orphan cleanup.
         """
-        destroy_with_disk_cleanup(self._workspace_dir, self._backend)
+        destroy_with_disk_cleanup(self._workspace_dir, self._backend, vm_name=self.name)
 
     # ---------------------------------------------------------------- SSH
 

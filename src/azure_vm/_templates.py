@@ -21,10 +21,9 @@ provider "azurerm" {{
   resource_provider_registrations = "none"
 }}
 
-resource "azurerm_resource_group" "main" {{
+{resource_group_kind} "azurerm_resource_group" "main" {{
   name     = "{resource_group}"
-  location = "{location}"
-}}
+{resource_group_location}}}
 """
 
 VM_TEMPLATE = """\
@@ -49,7 +48,7 @@ data "azurerm_resource_group" "main" {{
 resource "azurerm_virtual_network" "vm" {{
   name                = "${{var.vm_name}}-vnet"
   address_space       = ["10.0.0.0/16"]
-  location            = data.azurerm_resource_group.main.location
+  location            = "{location}"
   resource_group_name = data.azurerm_resource_group.main.name
 }}
 
@@ -62,7 +61,7 @@ resource "azurerm_subnet" "vm" {{
 
 resource "azurerm_network_security_group" "vm" {{
   name                = "${{var.vm_name}}-nsg"
-  location            = data.azurerm_resource_group.main.location
+  location            = "{location}"
   resource_group_name = data.azurerm_resource_group.main.name
 
   security_rule {{
@@ -85,14 +84,14 @@ resource "azurerm_subnet_network_security_group_association" "vm" {{
 
 resource "azurerm_public_ip" "vm" {{
   name                = "${{var.vm_name}}-pip"
-  location            = data.azurerm_resource_group.main.location
+  location            = "{location}"
   resource_group_name = data.azurerm_resource_group.main.name
   allocation_method   = "Static"
 }}
 
 resource "azurerm_network_interface" "vm" {{
   name                = "${{var.vm_name}}-nic"
-  location            = data.azurerm_resource_group.main.location
+  location            = "{location}"
   resource_group_name = data.azurerm_resource_group.main.name
 
   ip_configuration {{
@@ -105,7 +104,7 @@ resource "azurerm_network_interface" "vm" {{
 
 resource "azurerm_linux_virtual_machine" "vm" {{
   name                  = var.vm_name
-  location              = data.azurerm_resource_group.main.location
+  location              = "{location}"
   resource_group_name   = data.azurerm_resource_group.main.name
   network_interface_ids = [azurerm_network_interface.vm.id]
   size                  = var.vm_size
@@ -161,7 +160,7 @@ output "vm_state" {{
 }}
 
 output "location" {{
-  value = data.azurerm_resource_group.main.location
+  value = "{location}"
 }}
 
 output "vm_size" {{

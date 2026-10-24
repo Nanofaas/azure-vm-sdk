@@ -110,6 +110,14 @@ Missing disks are success; authorization, network, identity and attachment error
 are reported and unresolved entries remain available for retry. Call `delete()`
 or `purge()` again after resolving the error.
 
+If a partially completed Azure operation leaves a live VM missing from local
+state, cleanup checks the exact NIC recorded in that workspace. It imports the
+attached VM only after confirming the expected VM name, subscription, resource
+group and reciprocal NIC association, then destroys the VM before its network
+resources and tracks its OS disk. A late attachment causing `NicInUse` triggers
+one reconciliation and retry. Foreign attachments and lookup/import failures
+stop cleanup and preserve the workspace for retry; no name-prefix search is used.
+
 Keep the workspace and its disk registry until cleanup completes. Older local
 workspaces can recover disk IDs from their retained VM state (including AzureRM
 versions before 4.15). If both the state and registry have already been lost,
@@ -329,3 +337,24 @@ src/azure_vm/
 ├── exceptions.py      Exception hierarchy
 └── testing.py         Test doubles for consumers (FakeBackend, CommandResult)
 ```
+
+## Regional VMs in an existing resource group
+
+To place VMs in different regions while sharing one existing resource group, use
+one workspace per region and disable resource-group management. VM names must
+remain unique across all workspaces sharing the resource group:
+
+```python
+north = AzureClient(
+    resource_group="my-existing-rg",
+    location="northeurope",
+    work_dir="./azure/north",
+    manage_resource_group=False,
+)
+```
+
+The VM and its network resources use `location`, independently of the resource
+group's metadata location. With `manage_resource_group=False`, the group must
+already exist and is only read. The default remains `True` for existing callers.
+Changing an already managed shared workspace to this mode is rejected; use a fresh
+workspace so OpenTofu cannot interpret the change as deleting the resource group.

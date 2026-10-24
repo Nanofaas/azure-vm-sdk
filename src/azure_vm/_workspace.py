@@ -45,14 +45,21 @@ class Workspace:
 
     # ----------------------------------------------------------- shared infra
 
-    def ensure_shared_infra(self, resource_group: str, location: str) -> None:
+    def ensure_shared_infra(
+        self, resource_group: str, location: str, *, manage_resource_group: bool = True
+    ) -> None:
         shared = self.shared_dir()
         hcl = SHARED_TEMPLATE.format(
             resource_group=resource_group,
-            location=location,
+            resource_group_kind="resource" if manage_resource_group else "data",
+            resource_group_location=f'  location = "{location}"\n'
+            if manage_resource_group
+            else "",
         )
         main_tf = shared / "main.tf"
         with self._shared_lock:
+            if not manage_resource_group:
+                _require_unmanaged_resource_group(shared)
             # Re-render from the current configuration: an existing workspace must
             # never silently pin stale parameters. Re-apply only on actual change.
             if main_tf.exists() and main_tf.read_text() == hcl:
@@ -61,7 +68,8 @@ class Workspace:
             main_tf.write_text(hcl)
             try:
                 run_command(self._backend, ["tofu", "init"], cwd=str(shared))
-                _try_import_resource_group(self._backend, shared, resource_group)
+                if manage_resource_group:
+                    _try_import_resource_group(self._backend, shared, resource_group)
                 run_command(
                     self._backend, ["tofu", "apply", "-auto-approve"], cwd=str(shared)
                 )
@@ -164,6 +172,28 @@ class Workspace:
         """Destroy all VM workspaces (preserving .shared/)."""
         for vm_dir_item in self.iter_vm_workspaces():
             destroy_with_disk_cleanup(vm_dir_item, self._backend)
+
+
+def _require_unmanaged_resource_group(shared: Path) -> None:
+    """Refuse changing owned resource-group state into a destructive removal plan."""
+    config = shared / "main.tf"
+    owns_config = (
+        config.exists() and 'resource "azurerm_resource_group"' in config.read_text()
+    )
+    state = shared / "terraform.tfstate"
+    resources = (
+        json.loads(state.read_text()).get("resources", []) if state.exists() else []
+    )
+    owns_state = any(
+        resource.get("mode") == "managed"
+        and resource.get("type") == "azurerm_resource_group"
+        for resource in resources
+    )
+    if owns_config or owns_state:
+        raise ValueError(
+            "manage_resource_group=False requires a fresh workspace; "
+            "this shared workspace owns a resource group"
+        )
 
 
 def _try_import_resource_group(

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from ._backend import CommandBackend, CommandResult, run_command
+from ._reconcile import reconcile_vm
 from .exceptions import AzureVmCommandError, AzureVmError
 
 LEDGER = "sdk-os-disks.json"
@@ -122,14 +123,29 @@ def apply_with_disk_tracking(
     return result
 
 
-def destroy_with_disk_cleanup(workspace: Path, backend: CommandBackend) -> None:
+def destroy_with_disk_cleanup(
+    workspace: Path, backend: CommandBackend, *, vm_name: str | None = None
+) -> None:
     """Destroy a VM and delete only its recorded, detached, unchanged OS disks.
 
     Errors leave the unresolved entries on disk for a later delete/purge call.
     No subscription-wide search or name-prefix matching is performed.
     """
     disks = remember_os_disks(workspace, backend)
-    run_command(backend, ["tofu", "destroy", "-auto-approve"], cwd=str(workspace))
+    name = vm_name if vm_name is not None else workspace.name
+    if reconcile_vm(workspace, backend, name):
+        disks = remember_os_disks(workspace, backend)
+    try:
+        run_command(backend, ["tofu", "destroy", "-auto-approve"], cwd=str(workspace))
+    except AzureVmCommandError as exc:
+        # An asynchronous Azure creation can attach the NIC after the first
+        # lookup. Recover once on this specific failure, never loop blindly.
+        if "NicInUse" not in exc.stderr + exc.stdout or not reconcile_vm(
+            workspace, backend, name
+        ):
+            raise
+        disks = remember_os_disks(workspace, backend)
+        run_command(backend, ["tofu", "destroy", "-auto-approve"], cwd=str(workspace))
     for disk_id, identity in list(disks.items()):
         data = _disk(backend, disk_id)
         if data is not None:
