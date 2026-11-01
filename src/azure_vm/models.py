@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import re
 from dataclasses import dataclass
@@ -130,6 +131,41 @@ class VmSize:
         ]
 
 
+@dataclass(frozen=True)
+class IngressRule:
+    """Allow inbound TCP traffic to one port from a bounded set of sources.
+
+    Sources are IPv4 or IPv6 CIDRs (a bare address is a host route); they are
+    normalized and deduplicated in order. An empty source list, an unbounded
+    ``/0`` source, an out-of-range port, or port 22 (governed by the VM's own
+    SSH rule) raises ``ValueError``.
+    """
+
+    port: int
+    sources: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """Validate and normalize the rule before any resource is rendered."""
+        if (
+            isinstance(self.port, bool)
+            or not isinstance(self.port, int)
+            or not 1 <= self.port <= 65535
+        ):
+            raise ValueError(f"invalid ingress port: {self.port!r}")
+        if self.port == 22:
+            raise ValueError("port 22 is governed by the SSH rule")
+        if isinstance(self.sources, str):
+            raise ValueError("ingress sources must be a sequence of CIDRs")
+        networks = [ipaddress.ip_network(s, strict=False) for s in self.sources]
+        if not networks:
+            raise ValueError(f"ingress rule for port {self.port} has no sources")
+        if any(network.prefixlen == 0 for network in networks):
+            raise ValueError("ingress sources must be bounded, not /0")
+        object.__setattr__(
+            self, "sources", tuple(dict.fromkeys(str(n) for n in networks))
+        )
+
+
 @dataclass
 class VmConfig:
     """Configuration for one VM requested from ``AzureClient.launch``."""
@@ -141,12 +177,21 @@ class VmConfig:
     cloud_init_config: dict | str | None = None
     ssh_key_path: str | None = None
     open_ports: tuple[int, ...] | None = None
+    ingress: tuple[IngressRule, ...] | None = None
     priority: str = "Regular"
     eviction_policy: str | None = None
     max_bid_price: float | None = None
 
     def __post_init__(self) -> None:
-        """Reject invalid Spot settings before any resources are created."""
+        """Reject invalid Spot or ingress settings before any resources exist."""
+        if self.ingress is not None:
+            if not all(isinstance(rule, IngressRule) for rule in self.ingress):
+                raise ValueError("ingress must contain IngressRule values")
+            both = sorted(
+                set(self.open_ports or ()) & {rule.port for rule in self.ingress}
+            )
+            if both:
+                raise ValueError(f"ports both open and restricted: {both}")
         if self.priority not in ("Regular", "Spot"):
             raise ValueError("priority must be Regular or Spot")
         if self.eviction_policy not in (None, "Delete", "Deallocate"):

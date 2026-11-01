@@ -210,17 +210,31 @@ def write_cloud_init(workspace: Path, config: dict | str | None) -> str:
     return '  custom_data = filebase64("cloud-init.yaml")\n'
 
 
-def render_security_rules(open_ports) -> str:
+def render_security_rules(open_ports, ingress=None) -> str:
     """Extra inbound TCP allow-rules for the per-VM NSG.
 
-    Port 22 is skipped (the SSH rule is always rendered). Source is "*",
-    matching the SSH rule's posture — these are short-lived e2e VMs; source
-    restriction is a possible future enhancement.
+    ``open_ports`` are reachable from any source ("*"), matching the SSH rule's
+    posture; ``ingress`` rules (``IngressRule``) only from their sources, with
+    the sources of several rules for one port merged into that port's rule.
+    Port 22 is skipped in ``open_ports`` (the SSH rule is always rendered). A
+    port both open to any source and restricted raises ``ValueError``. Each
+    rule is named ``Port<port>`` with a priority ascending from 1010 in port
+    order.
     """
+    public = {int(p) for p in (open_ports or [])} - {22}
+    restricted: dict[int, dict[str, None]] = {}
+    for rule in ingress or ():
+        restricted.setdefault(rule.port, {}).update(dict.fromkeys(rule.sources))
+    both = sorted(public & restricted.keys())
+    if both:
+        raise ValueError(f"ports both open and restricted: {both}")
     rules: list[str] = []
-    for index, port in enumerate(sorted({int(p) for p in (open_ports or [])})):
-        if port == 22:
-            continue
+    for index, port in enumerate(sorted(public | restricted.keys())):
+        if port in restricted:
+            prefixes = ", ".join(f'"{source}"' for source in restricted[port])
+            source = f"    source_address_prefixes    = [{prefixes}]\n"
+        else:
+            source = '    source_address_prefix      = "*"\n'
         rules.append(
             "\n  security_rule {\n"
             f'    name                       = "Port{port}"\n'
@@ -230,8 +244,8 @@ def render_security_rules(open_ports) -> str:
             '    protocol                   = "Tcp"\n'
             '    source_port_range          = "*"\n'
             f'    destination_port_range     = "{port}"\n'
-            '    source_address_prefix      = "*"\n'
-            '    destination_address_prefix = "*"\n'
+            + source
+            + '    destination_address_prefix = "*"\n'
             "  }\n"
         )
     return "".join(rules)

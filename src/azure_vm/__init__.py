@@ -10,7 +10,15 @@ from .exceptions import (
     TofuNotInstalledError,
     VmNotFoundError,
 )
-from .models import ImageInfo, VmArchitecture, VmConfig, VmInfo, VmSize, VmState
+from .models import (
+    ImageInfo,
+    IngressRule,
+    VmArchitecture,
+    VmConfig,
+    VmInfo,
+    VmSize,
+    VmState,
+)
 from .vm import AzureVM
 
 __all__ = [
@@ -21,6 +29,7 @@ __all__ = [
     "AzureVmTimeoutError",
     "CommandResult",
     "ImageInfo",
+    "IngressRule",
     "LaunchResult",
     "SshConnectionError",
     "TofuNotInstalledError",
