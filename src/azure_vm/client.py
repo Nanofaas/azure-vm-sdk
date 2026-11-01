@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -16,7 +16,7 @@ from ._discovery import list_sizes as _list_sizes
 from ._disks import apply_with_disk_tracking
 from ._workspace import Workspace
 from .exceptions import AzureVmCommandError, VmNotFoundError
-from .models import ImageInfo, VmConfig, VmInfo, VmSize, VmState
+from .models import ImageInfo, IngressRule, VmConfig, VmInfo, VmSize, VmState
 from .vm import AzureVM
 
 
@@ -110,6 +110,7 @@ class AzureClient:
         cloud_init_config: dict | str | None = None,
         ssh_key_path: str | None = None,
         open_ports: list[int] | tuple[int, ...] | None = None,
+        ingress: Sequence[IngressRule] | None = None,
         priority: str = "Regular",
         eviction_policy: str | None = None,
         max_bid_price: float | None = None,
@@ -121,10 +122,14 @@ class AzureClient:
         then ``tofu init`` and ``tofu apply`` run to create the VM. Raises
         ``AzureVmCommandError`` when the client has no ``resource_group`` or
         ``location``. Spot priority defaults to Delete eviction; omitted bid
-        uses the provider default of -1. Invalid Spot settings raise ValueError
-        before any resource is created.
+        uses the provider default of -1. ``ingress`` rules open ports to their
+        sources only, while ``open_ports`` open them to any source. Invalid Spot
+        settings or ingress rules raise ValueError before any resource is
+        created.
         """
         VmConfig(
+            open_ports=tuple(open_ports) if open_ports is not None else None,
+            ingress=tuple(ingress) if ingress is not None else None,
             priority=priority,
             eviction_policy=eviction_policy,
             max_bid_price=max_bid_price,
@@ -157,6 +162,7 @@ class AzureClient:
             ssh_username=self._ssh_username,
             default_ssh_key=self._ssh_key_path,
             open_ports=open_ports,
+            ingress=ingress,
             priority=priority,
             eviction_policy=eviction_policy,
             max_bid_price=max_bid_price,
@@ -204,6 +210,7 @@ class AzureClient:
                     cloud_init_config=cfg.cloud_init_config,
                     ssh_key_path=cfg.ssh_key_path,
                     open_ports=cfg.open_ports,
+                    ingress=cfg.ingress,
                     priority=cfg.priority,
                     eviction_policy=cfg.eviction_policy,
                     max_bid_price=cfg.max_bid_price,
@@ -344,6 +351,7 @@ class AzureClient:
         cloud_init_config: dict | str | None = None,
         ssh_key_path: str | None = None,
         open_ports: list[int] | tuple[int, ...] | None = None,
+        ingress: Sequence[IngressRule] | None = None,
         priority: str = "Regular",
         eviction_policy: str | None = None,
         max_bid_price: float | None = None,
@@ -353,7 +361,9 @@ class AzureClient:
         A VM with no workspace is launched with the given configuration. An
         existing workspace is re-rendered from that configuration and, unless
         the VM already reports ``VmState.RUNNING``, started; if its outputs can
-        no longer be read the VM is launched again from scratch.
+        no longer be read the VM is launched again from scratch. The rendered
+        ``open_ports`` and ``ingress`` rules reach Azure on the next apply, so a
+        VM that is already running keeps the rules it was created with.
         """
         if not self._workspace.vm_exists(name):
             return self.launch(
@@ -364,12 +374,15 @@ class AzureClient:
                 cloud_init_config=cloud_init_config,
                 ssh_key_path=ssh_key_path,
                 open_ports=open_ports,
+                ingress=ingress,
                 priority=priority,
                 eviction_policy=eviction_policy,
                 max_bid_price=max_bid_price,
             )
 
         VmConfig(
+            open_ports=tuple(open_ports) if open_ports is not None else None,
+            ingress=tuple(ingress) if ingress is not None else None,
             priority=priority,
             eviction_policy=eviction_policy,
             max_bid_price=max_bid_price,
@@ -402,6 +415,7 @@ class AzureClient:
             ssh_username=self._ssh_username,
             default_ssh_key=self._ssh_key_path,
             open_ports=open_ports,
+            ingress=ingress,
             priority=priority,
             eviction_policy=eviction_policy,
             max_bid_price=max_bid_price,
@@ -419,6 +433,7 @@ class AzureClient:
                 cloud_init_config=cloud_init_config,
                 ssh_key_path=ssh_key_path,
                 open_ports=open_ports,
+                ingress=ingress,
                 priority=priority,
                 eviction_policy=eviction_policy,
                 max_bid_price=max_bid_price,

@@ -85,6 +85,7 @@ for vm in vms:
 | `cloud_init_config` | `None` | cloud-init dict or YAML string |
 | `ssh_key_path` | `None` (inherits from client) | Path to SSH public key |
 | `open_ports` | `None` | Additional inbound TCP ports (SSH is always enabled) |
+| `ingress` | `None` | `IngressRule`s: inbound TCP ports reachable only from their source CIDRs |
 | `priority` | `"Regular"` | `"Regular"` or `"Spot"` |
 | `eviction_policy` | `None` | Spot only: `"Delete"` (effective default) or `"Deallocate"` |
 | `max_bid_price` | `None` | Spot only: USD/hour, finite and non-negative, or `-1` to disable price-based eviction |
@@ -94,6 +95,29 @@ for vm in vms:
 ```python
 vms = client.launch_many(configs, max_workers=4)
 ```
+
+### Restricted inbound ports
+
+`open_ports` opens ports to any source. `ingress` opens each port only to the
+CIDRs its `IngressRule` names, in the same OpenTofu-managed NSG, so the rules are
+in place from the first apply and stay consistent with the workspace state:
+
+```python
+from azure_vm import IngressRule
+
+vm = client.launch(
+    name="cloud",
+    ingress=[
+        IngressRule(8080, ("198.51.100.7/32", "203.0.113.0/24")),
+        IngressRule(9090, ("198.51.100.7/32",)),
+    ],
+)
+```
+
+Rules for the same port merge their sources into one rule named `Port<port>`. A
+port may be either open or restricted, not both; port 22 stays governed by the
+SSH rule. Rule changes reach Azure on the next apply: `ensure_running` re-renders
+them, but a VM that is already running keeps the rules it was created with.
 
 ### OS disk cleanup after eviction
 

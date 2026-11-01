@@ -94,6 +94,7 @@ class Workspace:
         ssh_username: str,
         default_ssh_key: str | None = None,
         open_ports=None,
+        ingress=None,
         priority: str = "Regular",
         eviction_policy: str | None = None,
         max_bid_price: float | None = None,
@@ -127,7 +128,7 @@ class Workspace:
             image_version=version,
             image_urn=full_urn,
             custom_data_block=cloud_init_block,
-            extra_security_rules=render_security_rules(open_ports),
+            extra_security_rules=render_security_rules(open_ports, ingress),
             spot_block=spot_block,
         )
         (workspace / "main.tf").write_text(hcl)
