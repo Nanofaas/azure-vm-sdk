@@ -11,6 +11,7 @@ from .exceptions import (
     VmNotFoundError,
 )
 from .models import (
+    MIN_OS_DISK_GB,
     ImageInfo,
     IngressRule,
     VmArchitecture,
@@ -22,6 +23,7 @@ from .models import (
 from .vm import AzureVM
 
 __all__ = [
+    "MIN_OS_DISK_GB",
     "AzureClient",
     "AzureVM",
     "AzureVmCommandError",

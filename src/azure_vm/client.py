@@ -123,11 +123,12 @@ class AzureClient:
         ``AzureVmCommandError`` when the client has no ``resource_group`` or
         ``location``. Spot priority defaults to Delete eviction; omitted bid
         uses the provider default of -1. ``ingress`` rules open ports to their
-        sources only, while ``open_ports`` open them to any source. Invalid Spot
-        settings or ingress rules raise ValueError before any resource is
-        created.
+        sources only, while ``open_ports`` open them to any source. An OS disk
+        below ``MIN_OS_DISK_GB``, invalid Spot settings or ingress rules raise
+        ValueError before any resource is created.
         """
         VmConfig(
+            disk_size_gb=disk_size_gb,
             open_ports=tuple(open_ports) if open_ports is not None else None,
             ingress=tuple(ingress) if ingress is not None else None,
             priority=priority,
@@ -381,6 +382,7 @@ class AzureClient:
             )
 
         VmConfig(
+            disk_size_gb=disk_size_gb,
             open_ports=tuple(open_ports) if open_ports is not None else None,
             ingress=tuple(ingress) if ingress is not None else None,
             priority=priority,
