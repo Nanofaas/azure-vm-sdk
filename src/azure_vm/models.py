@@ -8,6 +8,12 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+# Azure Marketplace Linux images (Ubuntu, Debian) ship a 30 GB OS disk, and
+# Azure refuses a VM whose OS disk is smaller than its image's. It does so only
+# when the VM itself is created, after its network resources exist, and the
+# image metadata does not state the size, so the floor is checked up front.
+MIN_OS_DISK_GB = 30
+
 
 class VmArchitecture(Enum):
     """CPU architecture a VM size is built on."""
@@ -183,7 +189,15 @@ class VmConfig:
     max_bid_price: float | None = None
 
     def __post_init__(self) -> None:
-        """Reject invalid Spot or ingress settings before any resources exist."""
+        """Reject invalid disk, Spot or ingress settings before any resources exist."""
+        disk = self.disk_size_gb
+        if isinstance(disk, bool) or not isinstance(disk, int):
+            raise ValueError(f"disk_size_gb must be whole gigabytes, got {disk!r}")
+        if disk < MIN_OS_DISK_GB:
+            raise ValueError(
+                f"disk_size_gb {disk} is smaller than the {MIN_OS_DISK_GB} GB OS "
+                "disk of Azure Marketplace Linux images"
+            )
         if self.ingress is not None:
             if not all(isinstance(rule, IngressRule) for rule in self.ingress):
                 raise ValueError("ingress must contain IngressRule values")

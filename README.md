@@ -80,7 +80,7 @@ for vm in vms:
 |-------|---------|-------------|
 | `name` | `None` (auto-generated) | VM name |
 | `vm_size` | `"Standard_B1s"` | Azure VM size |
-| `disk_size_gb` | `30` | OS disk size |
+| `disk_size_gb` | `30` | OS disk size in GB; at least `MIN_OS_DISK_GB` (30), the Marketplace Linux images' disk |
 | `image_urn` | `None` (Ubuntu 24.04 LTS) | Marketplace image URN |
 | `cloud_init_config` | `None` | cloud-init dict or YAML string |
 | `ssh_key_path` | `None` (inherits from client) | Path to SSH public key |
