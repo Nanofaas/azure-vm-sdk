@@ -41,10 +41,12 @@ class AzureClient:
         ssh_key_path: str | None = None,
         ssh_username: str = "azureuser",
         ssh_connect_timeout: float = 15.0,
-        ssh_keepalive_interval: float = 30.0,
+        ssh_keepalive_interval: float = 15.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
         ssh_connect_attempts: int = 6,
         manage_resource_group: bool = True,
+        ssh_keepalive_count_max: int = 4,
+        ssh_transfer_attempts: int = 3,
     ) -> None:
         """Configure the client and locate the workspace root it manages.
 
@@ -63,7 +65,13 @@ class AzureClient:
         self._manage_resource_group = manage_resource_group
         if ssh_connect_attempts < 1:
             raise ValueError("ssh_connect_attempts must be at least 1")
+        if ssh_keepalive_count_max < 1:
+            raise ValueError("ssh_keepalive_count_max must be at least 1")
+        if ssh_transfer_attempts < 1:
+            raise ValueError("ssh_transfer_attempts must be at least 1")
         self._ssh_connect_attempts = ssh_connect_attempts
+        self._ssh_keepalive_count_max = ssh_keepalive_count_max
+        self._ssh_transfer_attempts = ssh_transfer_attempts
         self._resource_group = resource_group
         self._location = location
         self._backend: CommandBackend = backend or TofuBackend()
@@ -96,6 +104,8 @@ class AzureClient:
             ssh_keepalive_interval=self._ssh_keepalive_interval,
             ssh_client_id=self._ssh_client_id,
             ssh_connect_attempts=self._ssh_connect_attempts,
+            ssh_keepalive_count_max=self._ssh_keepalive_count_max,
+            ssh_transfer_attempts=self._ssh_transfer_attempts,
         )
 
     # --------------------------------------------------------------- launch

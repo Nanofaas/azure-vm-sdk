@@ -19,13 +19,25 @@ from paramiko.ssh_exception import IncompatiblePeer, NoValidConnectionsError
 
 from ._backend import CommandBackend, CommandResult, run_command
 from ._disks import LEDGER, apply_with_disk_tracking, destroy_with_disk_cleanup
+from ._liveness import Liveness
 from .exceptions import (
     AzureVmTimeoutError,
     SshConnectionError,
+    SshStallError,
 )
 from .models import VmInfo
 
 _LOGGER = logging.getLogger(__name__)
+
+# Transfer failures worth a fresh connection: a stalled or dropped session,
+# not a missing file or a refused permission.
+_TRANSFER_RETRYABLE = (
+    SshStallError,
+    EOFError,
+    paramiko.SSHException,
+    ConnectionError,
+    TimeoutError,
+)
 
 
 def _retryable_ssh_error(error: BaseException) -> bool:
@@ -68,15 +80,22 @@ class AzureVM:
         ssh_key_path: str | None = None,
         ssh_username: str = "azureuser",
         ssh_connect_timeout: float = 15.0,
-        ssh_keepalive_interval: float = 30.0,
+        ssh_keepalive_interval: float = 15.0,
         ssh_client_id: str | None = "OpenSSH_9.6p1",
         ssh_connect_attempts: int = 6,
+        ssh_keepalive_count_max: int = 4,
+        ssh_transfer_attempts: int = 3,
     ) -> None:
         """Bind the handle to a VM name, workspace directory and command backend.
 
         ``ssh_client_id`` is the client banner paramiko announces during the
-        handshake; ``None`` leaves paramiko's own default in place. A
-        ``ssh_keepalive_interval`` of zero disables keepalive probes.
+        handshake; ``None`` leaves paramiko's own default in place. Every
+        ``ssh_keepalive_interval`` seconds an open session asks the VM for a
+        reply; one left unanswered for ``ssh_keepalive_interval *
+        ssh_keepalive_count_max`` seconds closes the session and fails the
+        command or transfer on it with ``SshStallError``. An interval of zero
+        disables the probes. ``ssh_transfer_attempts`` limits how many
+        connections a transfer tries when a session stalls or drops.
         ``ssh_connect_attempts`` limits transient connection retries (default 6);
         one disables retries. The backoff doubles from 1 to 10 seconds, with
         jitter between half and all of that delay. ``ssh_connect_timeout``
@@ -85,7 +104,13 @@ class AzureVM:
         """
         if ssh_connect_attempts < 1:
             raise ValueError("ssh_connect_attempts must be at least 1")
+        if ssh_keepalive_count_max < 1:
+            raise ValueError("ssh_keepalive_count_max must be at least 1")
+        if ssh_transfer_attempts < 1:
+            raise ValueError("ssh_transfer_attempts must be at least 1")
         self._ssh_connect_attempts = ssh_connect_attempts
+        self._ssh_keepalive_count_max = ssh_keepalive_count_max
+        self._ssh_transfer_attempts = ssh_transfer_attempts
         self.name = name
         self._workspace_dir = workspace_dir
         self._backend = backend
@@ -95,6 +120,8 @@ class AzureVM:
         self._ssh_keepalive_interval = ssh_keepalive_interval
         self._ssh_client_id = ssh_client_id
         self._ssh: paramiko.SSHClient | None = None
+        self._ssh_liveness: Liveness | None = None
+        self._ssh_host = ""
 
     def _run(self, args: list[str]) -> CommandResult:
         if args[:2] == ["tofu", "apply"]:
@@ -144,6 +171,9 @@ class AzureVM:
 
     def close(self) -> None:
         """Close the cached SSH connection, if one is open."""
+        if self._ssh_liveness is not None:
+            self._ssh_liveness.stop()
+            self._ssh_liveness = None
         if self._ssh is not None:
             self._ssh.close()
             self._ssh = None
@@ -158,10 +188,11 @@ class AzureVM:
             ):
                 return self._ssh
             self.close()
-        self._ssh = self._connect_ssh()
+        self._ssh, self._ssh_liveness, self._ssh_host = self._connect_ssh()
         return self._ssh
 
-    def _connect_ssh(self) -> paramiko.SSHClient:
+    def _connect_ssh(self) -> tuple[paramiko.SSHClient, Liveness | None, str]:
+        """Open a session; return it, its watchdog (if probing) and the host."""
         ip = self._ip()
         if not ip:
             raise AzureVmTimeoutError(self.name, 0)
@@ -210,24 +241,36 @@ class AzureVM:
                 )
                 time.sleep(delay)
                 backoff = min(backoff * 2, 10.0)
-        # Enable keepalive so a silently-dropped connection surfaces as an
-        # error within a few missed probes instead of blocking forever in
-        # recv_exit_status(). Long-lived commands (load tests, image builds)
-        # over cloud NAT otherwise hang indefinitely on a dead peer.
-        if self._ssh_keepalive_interval > 0:
-            transport = ssh.get_transport()
-            if transport is not None:
-                transport.set_keepalive(self._ssh_keepalive_interval)
-        return ssh
+        # Probe the peer so a silently dropped connection fails within a few
+        # unanswered requests instead of blocking reads, recv_exit_status()
+        # and SFTP until the kernel gives up. A command that prints nothing
+        # for a long time (a load test, an image build) is not affected: only
+        # the peer's answers are awaited, not the command's output.
+        liveness = None
+        transport = ssh.get_transport()
+        if self._ssh_keepalive_interval > 0 and transport is not None:
+            liveness = Liveness(
+                transport,
+                interval=self._ssh_keepalive_interval,
+                count_max=self._ssh_keepalive_count_max,
+                label=f"{self.name} ({ip})",
+            )
+            liveness.start()
+        return ssh, liveness, ip
+
+    def _stall(self, liveness: Liveness, host: str) -> SshStallError:
+        return SshStallError(self.name, host, liveness.deadline)
 
     def exec(self, command: list[str]) -> CommandResult:
         """Run ``command`` over SSH and return its captured output and exit code.
 
         The argv is shell-quoted and joined into a single string before being
         sent. A connection dropped mid-command clears the cached session and
-        re-raises the original error.
+        re-raises the original error; one that stops answering raises
+        ``SshStallError`` instead.
         """
         ssh = self._ssh_client()
+        liveness, host = self._ssh_liveness, self._ssh_host
         try:
             _, stdout, stderr = ssh.exec_command(shlex.join(command))
             # Drain both streams before waiting for exit: they share a bounded
@@ -243,15 +286,22 @@ class AzureVM:
                     stdout.channel.close()
                     raise
             exit_status = stdout.channel.recv_exit_status()
-            return CommandResult(
-                args=command,
-                returncode=exit_status,
-                stdout=output_bytes.decode("utf-8", errors="replace"),
-                stderr=error_bytes.decode("utf-8", errors="replace"),
-            )
-        except (EOFError, OSError, paramiko.SSHException):
+        except (EOFError, OSError, paramiko.SSHException) as error:
             self.close()
+            if liveness is not None and liveness.expired:
+                raise self._stall(liveness, host) from error
             raise
+        # A channel closed by the watchdog ends without an exit status (-1);
+        # one whose status arrived before the close really finished.
+        if exit_status == -1 and liveness is not None and liveness.expired:
+            self.close()
+            raise self._stall(liveness, host)
+        return CommandResult(
+            args=command,
+            returncode=exit_status,
+            stdout=output_bytes.decode("utf-8", errors="replace"),
+            stderr=error_bytes.decode("utf-8", errors="replace"),
+        )
 
     def exec_structured(
         self,
@@ -280,20 +330,53 @@ class AzureVM:
 
         A ``source`` containing ``:`` is read as the remote path and downloaded
         to the local ``dest``; otherwise the local ``source`` is uploaded to
-        the remote ``dest``. The transfer uses its own connection, which is
-        closed when the copy finishes.
+        the remote ``dest``. Each attempt uses its own connection, closed when
+        it ends, and writes ``<dest>.partial`` before renaming it to ``dest``,
+        so ``dest`` never holds a partial copy. A session that stalls or drops
+        is retried on a new connection up to ``ssh_transfer_attempts`` times
+        in all; other errors (a missing file, a refused permission) are raised
+        at once. A failed upload may leave ``<dest>.partial`` on the VM.
         """
-        ssh = self._connect_ssh()
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                self._transfer_once(source, dest)
+                return
+            except _TRANSFER_RETRYABLE as error:
+                if attempt >= self._ssh_transfer_attempts:
+                    raise
+                _LOGGER.warning(
+                    "Transfer to or from %s failed; attempt %d/%d: %s",
+                    self.name,
+                    attempt + 1,
+                    self._ssh_transfer_attempts,
+                    error,
+                )
+
+    def _transfer_once(self, source: str, dest: str) -> None:
+        ssh, liveness, host = self._connect_ssh()
+        partial = f"{dest}.partial"
         try:
             sftp = ssh.open_sftp()
             try:
                 if ":" in source:
-                    sftp.get(source, dest)
+                    sftp.get(source, partial)
+                    Path(partial).replace(dest)
                 else:
-                    sftp.put(source, dest)
+                    sftp.put(source, partial)
+                    sftp.posix_rename(partial, dest)
             finally:
                 sftp.close()
+        except (EOFError, OSError, paramiko.SSHException) as error:
+            if ":" in source:
+                Path(partial).unlink(missing_ok=True)
+            if liveness is not None and liveness.expired:
+                raise self._stall(liveness, host) from error
+            raise
         finally:
+            if liveness is not None:
+                liveness.stop()
             ssh.close()
 
     # --------------------------------------------------------------- clone
