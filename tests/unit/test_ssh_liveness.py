@@ -229,9 +229,11 @@ def test_a_stalled_upload_is_retried_on_a_new_connection(sessions, tmp_path):
 
     assert stalled.closed
     assert fresh.closed
+    partial = fresh.sftp.calls[0][2]
+    assert partial.startswith("/srv/image.tar.") and partial.endswith(".partial")
     assert fresh.sftp.calls == [
-        ("put", str(tmp_path / "image.tar"), "/srv/image.tar.partial"),
-        ("rename", "/srv/image.tar.partial", "/srv/image.tar"),
+        ("put", str(tmp_path / "image.tar"), partial),
+        ("rename", partial, "/srv/image.tar"),
     ]
 
 

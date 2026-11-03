@@ -48,10 +48,11 @@ of blocking until the kernel gives up on the TCP connection. A command that
 prints nothing for a long time is not affected: only the VM's answers are
 awaited. An interval of `0` disables the probes.
 
-`transfer` writes `<dest>.partial` and renames it to `dest` once complete. A
+`transfer` writes `<dest>.<unique-id>.partial` and renames it to `dest` once complete. Every attempt uses its own staging file, so concurrent copies
+do not overwrite one another before the final rename. A
 transfer whose session stalls or drops is retried on a new connection, up to
 `ssh_transfer_attempts` attempts in all (3 by default); a missing file or a
-refused permission fails at once. A failed upload may leave `<dest>.partial`
+refused permission fails at once. A failed upload may leave `<dest>.<unique-id>.partial`
 on the VM. Commands are still never retried.
 
 ### Multiple VMs in parallel

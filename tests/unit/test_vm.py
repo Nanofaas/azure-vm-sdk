@@ -451,12 +451,12 @@ def test_transfer_sends_file(mock_ssh_client, tmp_path):
     local_file.write_text("content")
     vm.transfer(str(local_file), "/home/azureuser/test.txt")
 
-    sftp.put.assert_called_once_with(
-        str(local_file), "/home/azureuser/test.txt.partial"
+    partial = sftp.put.call_args.args[1]
+    assert partial.startswith("/home/azureuser/test.txt.") and partial.endswith(
+        ".partial"
     )
-    sftp.posix_rename.assert_called_once_with(
-        "/home/azureuser/test.txt.partial", "/home/azureuser/test.txt"
-    )
+    sftp.put.assert_called_once_with(str(local_file), partial)
+    sftp.posix_rename.assert_called_once_with(partial, "/home/azureuser/test.txt")
 
 
 @patch("azure_vm.vm.paramiko.SSHClient")
@@ -474,11 +474,13 @@ def test_transfer_downloads_file(mock_ssh_client, tmp_path):
     vm.transfer("remote:/path/to/file", str(tmp_path / "downloaded.txt"))
 
     # The copy lands beside its destination and is renamed into place.
-    sftp.get.assert_called_once_with(
-        "remote:/path/to/file", str(tmp_path / "downloaded.txt.partial")
+    partial = sftp.get.call_args.args[1]
+    assert partial.startswith(str(tmp_path / "downloaded.txt.")) and partial.endswith(
+        ".partial"
     )
+    sftp.get.assert_called_once_with("remote:/path/to/file", partial)
     assert (tmp_path / "downloaded.txt").read_text() == "data"
-    assert not (tmp_path / "downloaded.txt.partial").exists()
+    assert not Path(partial).exists()
 
 
 # --------------------------------------------------------------- clone

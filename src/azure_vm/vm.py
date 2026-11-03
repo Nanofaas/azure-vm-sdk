@@ -13,6 +13,7 @@ import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from uuid import uuid4
 
 import paramiko
 from paramiko.ssh_exception import IncompatiblePeer, NoValidConnectionsError
@@ -331,11 +332,11 @@ class AzureVM:
         A ``source`` containing ``:`` is read as the remote path and downloaded
         to the local ``dest``; otherwise the local ``source`` is uploaded to
         the remote ``dest``. Each attempt uses its own connection, closed when
-        it ends, and writes ``<dest>.partial`` before renaming it to ``dest``,
-        so ``dest`` never holds a partial copy. A session that stalls or drops
-        is retried on a new connection up to ``ssh_transfer_attempts`` times
+        it ends, and writes ``<dest>.<unique-id>.partial`` before renaming it
+        to ``dest``, so ``dest`` never holds a partial copy. A stalled or dropped
+        session is retried on a new connection up to ``ssh_transfer_attempts`` times
         in all; other errors (a missing file, a refused permission) are raised
-        at once. A failed upload may leave ``<dest>.partial`` on the VM.
+        at once. A failed upload may leave ``<dest>.<unique-id>.partial`` on the VM.
         """
         attempt = 0
         while True:
@@ -356,7 +357,7 @@ class AzureVM:
 
     def _transfer_once(self, source: str, dest: str) -> None:
         ssh, liveness, host = self._connect_ssh()
-        partial = f"{dest}.partial"
+        partial = f"{dest}.{uuid4().hex}.partial"
         try:
             sftp = ssh.open_sftp()
             try:
@@ -373,6 +374,13 @@ class AzureVM:
                 Path(partial).unlink(missing_ok=True)
             if liveness is not None and liveness.expired:
                 raise self._stall(liveness, host) from error
+            # Paramiko Channel._send uses a bare OSError for a closed channel.
+            if (
+                isinstance(error, OSError)
+                and error.errno is None
+                and str(error) == "Socket is closed"
+            ):
+                raise ConnectionError(str(error)) from error
             raise
         finally:
             if liveness is not None:
