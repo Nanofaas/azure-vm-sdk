@@ -60,3 +60,16 @@ class SshConnectionError(AzureVmError):
         self.host = host
         self.reason = reason
         super().__init__(f"SSH connection to '{name}' ({host}) failed: {reason}")
+
+
+class SshStallError(SshConnectionError):
+    """Raised when an open SSH session stops answering keepalive requests.
+
+    The command or transfer running on it did not finish; the session is
+    closed and the next call opens a new one.
+    """
+
+    def __init__(self, name: str, host: str, seconds: float) -> None:
+        """Expose the VM ``name``, its ``host`` and the unanswered ``seconds``."""
+        self.seconds = seconds
+        super().__init__(name, host, f"no keepalive answered within {seconds:g}s")

@@ -42,7 +42,8 @@ def connections(monkeypatch):
                 raise failures.pop(0)
 
         def get_transport(self):
-            return SimpleNamespace(set_keepalive=lambda _interval: None)
+            # An inactive transport ends its watchdog at the first probe.
+            return SimpleNamespace(is_active=lambda: False)
 
         def exec_command(self, command):
             commands.append(command)

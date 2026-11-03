@@ -7,6 +7,7 @@ from .exceptions import (
     AzureVmError,
     AzureVmTimeoutError,
     SshConnectionError,
+    SshStallError,
     TofuNotInstalledError,
     VmNotFoundError,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "IngressRule",
     "LaunchResult",
     "SshConnectionError",
+    "SshStallError",
     "TofuNotInstalledError",
     "VmArchitecture",
     "VmConfig",

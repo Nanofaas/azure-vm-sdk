@@ -171,8 +171,9 @@ def test_exec_runs_command_over_ssh(mock_ssh_client):
         banner_timeout=15.0,
         auth_timeout=15.0,
     )
-    # a silent peer drop must surface, not hang: keepalive is enabled
-    ssh.get_transport.return_value.set_keepalive.assert_called_once_with(30.0)
+    # a silent peer drop must surface, not hang: the session is watched
+    assert vm._ssh_liveness is not None
+    assert vm._ssh_liveness.deadline == 15.0 * 4
     assert result.stdout == "hello\n"
     assert result.success is True
     assert second.success is True
@@ -320,7 +321,9 @@ def test_exec_honours_custom_ssh_timeouts(mock_ssh_client):
     vm.exec(["true"])
 
     assert ssh.connect.call_args.kwargs["timeout"] == 5.0
-    ssh.get_transport.return_value.set_keepalive.assert_called_once_with(7.0)
+    assert vm._ssh_liveness is not None
+    assert vm._ssh_liveness.deadline == 7.0 * 4
+    vm.close()
 
 
 @patch("azure_vm.vm.paramiko.SSHClient")
@@ -343,7 +346,8 @@ def test_exec_skips_keepalive_when_disabled(mock_ssh_client):
     )
     vm.exec(["true"])
 
-    ssh.get_transport.return_value.set_keepalive.assert_not_called()
+    assert vm._ssh_liveness is None
+    ssh.get_transport.return_value.global_request.assert_not_called()
 
 
 @patch("azure_vm.vm.paramiko.SSHClient")
@@ -447,7 +451,12 @@ def test_transfer_sends_file(mock_ssh_client, tmp_path):
     local_file.write_text("content")
     vm.transfer(str(local_file), "/home/azureuser/test.txt")
 
-    sftp.put.assert_called_once()
+    sftp.put.assert_called_once_with(
+        str(local_file), "/home/azureuser/test.txt.partial"
+    )
+    sftp.posix_rename.assert_called_once_with(
+        "/home/azureuser/test.txt.partial", "/home/azureuser/test.txt"
+    )
 
 
 @patch("azure_vm.vm.paramiko.SSHClient")
@@ -456,6 +465,7 @@ def test_transfer_downloads_file(mock_ssh_client, tmp_path):
     mock_ssh_client.return_value = ssh
     sftp = MagicMock()
     ssh.open_sftp.return_value = sftp
+    sftp.get.side_effect = lambda _remote, local: Path(local).write_text("data")
 
     backend = FakeBackend()
     backend.set_default(make_ok(OUTPUT_JSON))
@@ -463,9 +473,12 @@ def test_transfer_downloads_file(mock_ssh_client, tmp_path):
 
     vm.transfer("remote:/path/to/file", str(tmp_path / "downloaded.txt"))
 
+    # The copy lands beside its destination and is renamed into place.
     sftp.get.assert_called_once_with(
-        "remote:/path/to/file", str(tmp_path / "downloaded.txt")
+        "remote:/path/to/file", str(tmp_path / "downloaded.txt.partial")
     )
+    assert (tmp_path / "downloaded.txt").read_text() == "data"
+    assert not (tmp_path / "downloaded.txt.partial").exists()
 
 
 # --------------------------------------------------------------- clone
